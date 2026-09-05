@@ -23,6 +23,9 @@ HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABI
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -2009,3 +2012,88 @@ int airspy_list_devices(uint64_t *serials, int count)
 #ifdef __cplusplus
 } // __cplusplus defined.
 #endif
+
+int ADDCALL airspy_mem_read(struct airspy_device* device, uint32_t address, void* data, uint16_t len)
+{
+	int result;
+	if (len == 0 || len > 64)
+		return AIRSPY_ERROR_INVALID_PARAM;
+	result = libusb_control_transfer(
+		device->usb_device,
+		LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+		AIRSPY_MEM_READ,
+		address & 0xFFFF,
+		address >> 16,
+		(unsigned char*)data,
+		len,
+		0);
+	if (result < len)
+		return AIRSPY_ERROR_LIBUSB;
+	return AIRSPY_SUCCESS;
+}
+
+int ADDCALL airspy_mem_write(struct airspy_device* device, uint32_t address, const void* data, uint16_t len)
+{
+	int result;
+	if (len == 0 || len > 64)
+		return AIRSPY_ERROR_INVALID_PARAM;
+	result = libusb_control_transfer(
+		device->usb_device,
+		LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+		AIRSPY_MEM_WRITE,
+		address & 0xFFFF,
+		address >> 16,
+		(unsigned char*)data,
+		len,
+		0);
+	if (result < len)
+		return AIRSPY_ERROR_LIBUSB;
+	return AIRSPY_SUCCESS;
+}
+
+int ADDCALL airspy_call(struct airspy_device* device, uint32_t core, uint32_t address, const uint32_t args[4], uint32_t* r0, uint32_t timeout_ms)
+{
+	airspy_call_request_t req;
+	airspy_call_result_t res;
+	int result;
+	uint32_t waited = 0;
+
+	req.core = TO_LE(core);
+	req.address = TO_LE(address);
+	req.r[0] = TO_LE(args[0]);
+	req.r[1] = TO_LE(args[1]);
+	req.r[2] = TO_LE(args[2]);
+	req.r[3] = TO_LE(args[3]);
+	result = libusb_control_transfer(
+		device->usb_device,
+		LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+		AIRSPY_CALL, 0, 0, (unsigned char*)&req, sizeof(req), 0);
+	if (result < (int)sizeof(req))
+		return AIRSPY_ERROR_LIBUSB;
+
+	for (;;)
+	{
+		result = libusb_control_transfer(
+			device->usb_device,
+			LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+			AIRSPY_CALL, 0, 0, (unsigned char*)&res, sizeof(res), 0);
+		if (result < (int)sizeof(res))
+			return AIRSPY_ERROR_LIBUSB;
+		res.status = TO_LE(res.status);
+		if (res.status == 0)
+		{
+			*r0 = TO_LE(res.r0);
+			return AIRSPY_SUCCESS;
+		}
+		if (res.status != 1)
+			return AIRSPY_ERROR_INVALID_PARAM;
+		if (waited >= timeout_ms)
+			return AIRSPY_ERROR_BUSY;
+#ifdef _WIN32
+		Sleep(1);
+#else
+		usleep(1000);
+#endif
+		waited++;
+	}
+}

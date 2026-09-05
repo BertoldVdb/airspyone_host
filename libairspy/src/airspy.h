@@ -168,6 +168,11 @@ extern ADDAPI int ADDCALL airspy_spiflash_erase(struct airspy_device* device);
 extern ADDAPI int ADDCALL airspy_spiflash_write(struct airspy_device* device, const uint32_t address, const uint16_t length, unsigned char* const data);
 extern ADDAPI int ADDCALL airspy_spiflash_read(struct airspy_device* device, const uint32_t address, const uint16_t length, unsigned char* data);
 
+
+/* Debug access to the device: read or write up to 64 bytes of memory */
+extern ADDAPI int ADDCALL airspy_mem_read(struct airspy_device* device, uint32_t address, void* data, uint16_t len);
+extern ADDAPI int ADDCALL airspy_mem_write(struct airspy_device* device, uint32_t address, const void* data, uint16_t len);
+extern ADDAPI int ADDCALL airspy_call(struct airspy_device* device, uint32_t core, uint32_t address, const uint32_t args[4], uint32_t* r0, uint32_t timeout_ms);
 extern ADDAPI int ADDCALL airspy_board_id_read(struct airspy_device* device, uint8_t* value);
 /* Parameter length shall be at least 128bytes to avoid possible string clipping */
 extern ADDAPI int ADDCALL airspy_version_string_read(struct airspy_device* device, char* version, uint8_t length);
