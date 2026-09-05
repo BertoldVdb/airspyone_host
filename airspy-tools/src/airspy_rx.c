@@ -242,6 +242,8 @@ uint32_t framing_val = 1;
 uint32_t watchdog_val = 0;
 bool framing_given = false;
 airspy_transfer_metadata_t frame_meta;
+bool calibration_given = false;
+int32_t calibration_val = 0;
 uint64_t frame_gap_samples = 0;
 uint32_t frame_blocks = 0;
 
@@ -557,6 +559,7 @@ int main(int argc, char** argv)
 	char str[20];
 
 	while( (opt = getopt(argc, argv, "r:ws:p:F:W:f:a:t:b:v:m:l:g:h:n:d")) != EOF )
+	while( (opt = getopt(argc, argv, "r:ws:p:F:W:B:N:C:f:a:t:b:v:m:l:g:h:n:d")) != EOF )
 	{
 		result = AIRSPY_SUCCESS;
 		switch( opt ) 
@@ -581,6 +584,15 @@ int main(int argc, char** argv)
 				{
 					result = AIRSPY_ERROR_INVALID_PARAM;
 				}
+				break;
+
+			case 'C': /* crystal correction in ppb */
+				calibration_given = true;
+				calibration_val = (int32_t)strtol(optarg, NULL, 10);
+				break;
+
+				break;
+
 				break;
 
 			case 'F': /* framing */
@@ -972,6 +984,20 @@ int main(int argc, char** argv)
 			airspy_close(device);
 			airspy_exit();
 			return EXIT_FAILURE;
+		}
+	}
+
+	if (calibration_given)
+	{
+		result = airspy_set_calibration(device, calibration_val);
+		if (result != AIRSPY_SUCCESS)
+		{
+			printf("airspy_set_calibration() failed: %s (%d)\n", airspy_error_name(result), result);
+		}
+	}
+	{
+		if (result != AIRSPY_SUCCESS)
+		{
 		}
 	}
 

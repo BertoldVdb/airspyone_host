@@ -1071,6 +1071,11 @@ static int airspy_open_init(airspy_device_t** device, uint64_t serial_number, in
 	lib_device->packing_enabled = false;
 	lib_device->dev_mem_buffers = false;
 	lib_device->framing_requested = true;
+	{
+		const char* env_ppb = getenv("AIRSPY_CALIBRATION_PPB");
+		if (env_ppb != NULL)
+			airspy_set_calibration(lib_device, (int32_t)strtol(env_ppb, NULL, 10));
+	}
 	lib_device->framing_active = false;
 	lib_device->framed_samples = NULL;
 	lib_device->meta_valid = false;
@@ -2396,3 +2401,37 @@ int ADDCALL airspy_call(struct airspy_device* device, uint32_t core, uint32_t ad
 	{
 		return airspy_watchdog_request(device, 1, status);
 	}
+int ADDCALL airspy_set_calibration(struct airspy_device* device, int32_t correction_ppb)
+{
+	uint32_t v = (uint32_t)correction_ppb;
+	int result = libusb_control_transfer(
+		device->usb_device,
+		LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+		AIRSPY_SET_CALIBRATION,
+		v & 0xFFFF,
+		v >> 16,
+		NULL,
+		0,
+		0);
+	if (result != 0)
+		return AIRSPY_ERROR_LIBUSB;
+	return AIRSPY_SUCCESS;
+}
+
+int ADDCALL airspy_get_calibration(struct airspy_device* device, airspy_calibration_t* calibration)
+{
+	int result = libusb_control_transfer(
+		device->usb_device,
+		LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+		AIRSPY_GET_CALIBRATION,
+		0,
+		0,
+		(unsigned char*)calibration,
+		sizeof(airspy_calibration_t),
+		0);
+	if (result < (int)sizeof(airspy_calibration_t))
+		return AIRSPY_ERROR_LIBUSB;
+	calibration->correction_ppb = (int32_t)TO_LE((uint32_t)calibration->correction_ppb);
+	calibration->source = TO_LE(calibration->source);
+	return AIRSPY_SUCCESS;
+}

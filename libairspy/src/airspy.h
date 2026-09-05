@@ -250,6 +250,10 @@ extern ADDAPI int ADDCALL airspy_get_stream_status(struct airspy_device* device,
 extern ADDAPI int ADDCALL airspy_watchdog_status(struct airspy_device* device, airspy_watchdog_status_t* status);
 extern ADDAPI int ADDCALL airspy_watchdog_feed(struct airspy_device* device, airspy_watchdog_status_t* status);
 
+/* Crystal correction in ppb, applied at once to the tuner */
+extern ADDAPI int ADDCALL airspy_set_calibration(struct airspy_device* device, int32_t correction_ppb);
+extern ADDAPI int ADDCALL airspy_get_calibration(struct airspy_device* device, airspy_calibration_t* calibration);
+
 /* Framed chunks: the library asks the device, at every airspy_start_rx() */
 extern ADDAPI int ADDCALL airspy_set_framing(struct airspy_device* device, uint8_t value);
 
