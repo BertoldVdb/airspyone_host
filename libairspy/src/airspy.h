@@ -130,9 +130,12 @@ typedef struct {
 	uint32_t dma_errors; /* ADC DMA bus errors: the DMA could not write part of the ring */
 	uint32_t usb_errors; /* bulk transfers the USB controller retired with an error */
   uint32_t adc_overflows; /* chunks during which the ADC FIFO overflowed */
+  uint32_t pps_count; /* PPS edges captured since the stream started */
 } airspy_stream_status_t;
 
 /* Metadata of the block delivered to the sample callback */
+#define AIRSPY_METADATA_UART_MAX (512) /* more than the 15 bytes per chunk times the chunks per block */
+
 typedef struct {
 	uint64_t sample_index; /* device sample index of the first sample of this block */
 	uint64_t gap_samples; /* samples missing between the previous block and this one */
@@ -141,8 +144,16 @@ typedef struct {
 	uint32_t overrun_chunks; /* chunks the device delivered corrupted since the stream started */
 	uint32_t sync_errors; /* chunks with an invalid header since the stream started */
 	uint32_t freq_hz;
+	/* External PPS input, from the block's last chunk */
+	uint64_t pps_sample_index;
+	uint32_t pps_fraction; /* position of the edge within that sample, in 1/2^32 sample units */
+	uint32_t pps_count; /* PPS edges captured since the stream started */
+	/* Bytes received on the device's auxiliary UART */
+	uint32_t uart_len;
+	uint8_t uart_data[AIRSPY_METADATA_UART_MAX];
 	uint32_t flags;          /* AIRSPY_FRAME_FLAG_* of the first chunk */
 } airspy_transfer_metadata_t;
+
 
 typedef int (*airspy_sample_block_cb_fn)(airspy_transfer* transfer);
 
@@ -196,11 +207,6 @@ extern ADDAPI int ADDCALL airspy_spiflash_erase(struct airspy_device* device);
 extern ADDAPI int ADDCALL airspy_spiflash_write(struct airspy_device* device, const uint32_t address, const uint16_t length, unsigned char* const data);
 extern ADDAPI int ADDCALL airspy_spiflash_read(struct airspy_device* device, const uint32_t address, const uint16_t length, unsigned char* data);
 
-
-/* Debug access to the device: read or write up to 64 bytes of memory */
-extern ADDAPI int ADDCALL airspy_mem_read(struct airspy_device* device, uint32_t address, void* data, uint16_t len);
-extern ADDAPI int ADDCALL airspy_mem_write(struct airspy_device* device, uint32_t address, const void* data, uint16_t len);
-extern ADDAPI int ADDCALL airspy_call(struct airspy_device* device, uint32_t core, uint32_t address, const uint32_t args[4], uint32_t* r0, uint32_t timeout_ms);
 extern ADDAPI int ADDCALL airspy_board_id_read(struct airspy_device* device, uint8_t* value);
 /* Parameter length shall be at least 128bytes to avoid possible string clipping */
 extern ADDAPI int ADDCALL airspy_version_string_read(struct airspy_device* device, char* version, uint8_t length);
@@ -248,17 +254,23 @@ extern ADDAPI int ADDCALL airspy_set_packing(struct airspy_device* device, uint8
 /* Read the device stream counters */
 extern ADDAPI int ADDCALL airspy_get_stream_status(struct airspy_device* device, airspy_stream_status_t* status);
 
-extern ADDAPI int ADDCALL airspy_watchdog_status(struct airspy_device* device, airspy_watchdog_status_t* status);
-extern ADDAPI int ADDCALL airspy_watchdog_feed(struct airspy_device* device, airspy_watchdog_status_t* status);
+/* Auxiliary UART on the device (GNSS module): 8N1 */
+extern ADDAPI int ADDCALL airspy_set_uart_baud(struct airspy_device* device, uint32_t baud);
+extern ADDAPI int ADDCALL airspy_uart_write(struct airspy_device* device, const uint8_t* data, uint16_t len);
 
 /* Crystal correction in ppb, applied at once to the tuner */
 extern ADDAPI int ADDCALL airspy_set_calibration(struct airspy_device* device, int32_t correction_ppb);
 extern ADDAPI int ADDCALL airspy_get_calibration(struct airspy_device* device, airspy_calibration_t* calibration);
 
+/* Debug access to the device: read or write up to 64 bytes of memory */
+extern ADDAPI int ADDCALL airspy_mem_read(struct airspy_device* device, uint32_t address, void* data, uint16_t len);
+extern ADDAPI int ADDCALL airspy_mem_write(struct airspy_device* device, uint32_t address, const void* data, uint16_t len);
+extern ADDAPI int ADDCALL airspy_call(struct airspy_device* device, uint32_t core, uint32_t address, const uint32_t args[4], uint32_t* r0, uint32_t timeout_ms);
+
 /* Framed chunks: the library asks the device, at every airspy_start_rx() */
 extern ADDAPI int ADDCALL airspy_set_framing(struct airspy_device* device, uint8_t value);
 
-/* Host-fed watchdog, a compile time option of the firmware */
+extern ADDAPI int ADDCALL airspy_watchdog_status(struct airspy_device* device, airspy_watchdog_status_t* status);
 extern ADDAPI int ADDCALL airspy_watchdog_feed(struct airspy_device* device, airspy_watchdog_status_t* status);
 
 /* Fill in the metadata of the block a sample callback is being called with */

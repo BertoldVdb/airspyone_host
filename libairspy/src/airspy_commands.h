@@ -44,7 +44,7 @@ typedef enum
 {
     AIRSPY_SAMPLERATE_10MSPS = 0, /* 12bits 10MHz IQ */
     AIRSPY_SAMPLERATE_2_5MSPS = 1, /* 12bits 2.5MHz IQ */
-  AIRSPY_SAMPLERATE_END = 2 /* End index for sample rate (corresponds to number of samplerate) */
+    AIRSPY_SAMPLERATE_END = 2 /* End index for sample rate (corresponds to number of samplerate) */
 } airspy_samplerate_t;
 
 
@@ -54,44 +54,56 @@ typedef enum
 #define AIRSPY_CMD_MAX (37)
 typedef enum
 {
-  AIRSPY_INVALID                    = 0 ,
-  AIRSPY_RECEIVER_MODE              = 1 ,
+    AIRSPY_INVALID                    = 0 ,
+    AIRSPY_RECEIVER_MODE              = 1 ,
     AIRSPY_SI5351C_WRITE              = 2 ,
     AIRSPY_SI5351C_READ               = 3 ,
     AIRSPY_R820T_WRITE                = 4 ,
     AIRSPY_R820T_READ                 = 5 ,
-  AIRSPY_SPIFLASH_ERASE             = 6 ,
-  AIRSPY_SPIFLASH_WRITE             = 7 ,
-  AIRSPY_SPIFLASH_READ              = 8 ,
-  AIRSPY_BOARD_ID_READ              = 9 ,
-  AIRSPY_VERSION_STRING_READ        = 10,
-  AIRSPY_BOARD_PARTID_SERIALNO_READ = 11,
-  AIRSPY_SET_SAMPLERATE             = 12,
-  AIRSPY_SET_FREQ                   = 13,
-  AIRSPY_SET_LNA_GAIN               = 14,
-  AIRSPY_SET_MIXER_GAIN             = 15,
-  AIRSPY_SET_VGA_GAIN               = 16,
-  AIRSPY_SET_LNA_AGC                = 17,
-  AIRSPY_SET_MIXER_AGC              = 18,
-  AIRSPY_MS_VENDOR_CMD              = 19,
-  AIRSPY_SET_RF_BIAS_CMD            = 20,
-  AIRSPY_GPIO_WRITE                 = 21,
-  AIRSPY_GPIO_READ                  = 22,
-  AIRSPY_GPIODIR_WRITE              = 23,
-  AIRSPY_GPIODIR_READ               = 24,
-  AIRSPY_GET_SAMPLERATES            = 25,
-  AIRSPY_SET_PACKING                = 26,
-  AIRSPY_SPIFLASH_ERASE_SECTOR      = 27,
-  AIRSPY_GET_STREAM_STATUS          = 28, /* IN: airspy_stream_status_t */
-  AIRSPY_SET_FRAMING                = 29, /* wIndex 1 = on, 0 = off; cleared at every stream stop */
-  AIRSPY_WATCHDOG                   = 30, /* IN: airspy_watchdog_status_t; wIndex 1 also feeds it */
-  AIRSPY_SET_CALIBRATION            = 33, /* wValue | wIndex << 16 = crystal correction in ppb (int32) */
-  AIRSPY_GET_CALIBRATION            = 34, /* IN: airspy_calibration_t */
-  AIRSPY_MEM_READ                   = 35, /* IN: wValue | wIndex << 16 = address, wLength <= 64 bytes */
-  AIRSPY_MEM_WRITE                  = 36, /* OUT: same addressing, data = bytes to write */
-  AIRSPY_CALL                       = AIRSPY_CMD_MAX /* OUT: airspy_call_request_t runs a function; IN: airspy_call_result_t */
+    AIRSPY_SPIFLASH_ERASE             = 6 ,
+    AIRSPY_SPIFLASH_WRITE             = 7 ,
+    AIRSPY_SPIFLASH_READ              = 8 ,
+    AIRSPY_BOARD_ID_READ              = 9 ,
+    AIRSPY_VERSION_STRING_READ        = 10,
+    AIRSPY_BOARD_PARTID_SERIALNO_READ = 11,
+    AIRSPY_SET_SAMPLERATE             = 12,
+    AIRSPY_SET_FREQ                   = 13,
+    AIRSPY_SET_LNA_GAIN               = 14,
+    AIRSPY_SET_MIXER_GAIN             = 15,
+    AIRSPY_SET_VGA_GAIN               = 16,
+    AIRSPY_SET_LNA_AGC                = 17,
+    AIRSPY_SET_MIXER_AGC              = 18,
+    AIRSPY_MS_VENDOR_CMD              = 19,
+    AIRSPY_SET_RF_BIAS_CMD            = 20,
+    AIRSPY_GPIO_WRITE                 = 21,
+    AIRSPY_GPIO_READ                  = 22,
+    AIRSPY_GPIODIR_WRITE              = 23,
+    AIRSPY_GPIODIR_READ               = 24,
+    AIRSPY_GET_SAMPLERATES            = 25,
+    AIRSPY_SET_PACKING                = 26,
+    AIRSPY_SPIFLASH_ERASE_SECTOR      = 27,
+    AIRSPY_GET_STREAM_STATUS          = 28,
+    AIRSPY_SET_FRAMING                = 29,
+    AIRSPY_WATCHDOG                   = 30,
+  AIRSPY_SET_UART_BAUD = 31, /* wValue = baud & 0xFFFF, wIndex = baud >> 16 */
+  AIRSPY_UART_WRITE = 32,
+  AIRSPY_SET_CALIBRATION = 33, /* wValue|wIndex<<16 = crystal correction in ppb (int32), applied at once */
+  AIRSPY_GET_CALIBRATION = 34,
+  /* Debug access, see airspy_debug: */
+  AIRSPY_MEM_READ = 35, /* IN: wValue | wIndex << 16 = address, wLength <= 64 bytes */
+  AIRSPY_MEM_WRITE = 36, /* OUT: same addressing, data = bytes to write */
+  AIRSPY_CALL = AIRSPY_CMD_MAX /* OUT: airspy_call_request_t runs a function; IN: airspy_call_result_t */ /* IN: airspy_calibration_t */ /* OUT data = bytes to transmit (max 64) */
 } airspy_vendor_request;
 
+#define AIRSPY_FRAME_HEADER_SIZE (96)
+#define AIRSPY_FRAME_MAGIC (0x59505341) /* "ASPY" */
+#define AIRSPY_FRAME_FLAG_PACKED (1 << 0) /* 12-bit packed samples (packing 1) */
+#define AIRSPY_FRAME_FLAG_8BIT   (1 << 1) /* one byte per sample, the top 8 bits (packing 2) */
+
+/* Crystal correction in effect: the flash block's value */
+#define AIRSPY_CALIBRATION_SOURCE_NONE  (0)
+#define AIRSPY_CALIBRATION_SOURCE_FLASH (1)
+#define AIRSPY_CALIBRATION_SOURCE_HOST  (2)
 typedef struct
 {
   uint32_t core; /* 0 = M0 (runs in the USB request handler), 1 = M4 (runs in its main loop) */
@@ -105,16 +117,6 @@ typedef struct
   uint32_t r0;
 } airspy_call_result_t;
 
-
-#define AIRSPY_FRAME_HEADER_SIZE (96)
-#define AIRSPY_FRAME_MAGIC (0x59505341) /* "ASPY" */
-#define AIRSPY_FRAME_FLAG_PACKED (1 << 0) /* 12-bit packed samples (packing 1) */
-#define AIRSPY_FRAME_FLAG_8BIT   (1 << 1) /* one byte per sample, the top 8 bits (packing 2) */
-
-/* Crystal correction in effect: the flash block's value */
-#define AIRSPY_CALIBRATION_SOURCE_NONE  (0)
-#define AIRSPY_CALIBRATION_SOURCE_FLASH (1)
-#define AIRSPY_CALIBRATION_SOURCE_HOST  (2)
 typedef struct
 {
   int32_t correction_ppb;
@@ -138,6 +140,7 @@ typedef struct
 #define AIRSPY_FRAME_WIRE_UNPACKED (16384)
 #define AIRSPY_FRAME_WIRE_PACKED (6144)
 #define AIRSPY_FRAME_WIRE_8BIT (4096)
+#define AIRSPY_FRAME_UART_BYTES (15) /* auxiliary UART bytes carried per chunk header */
 
 /* AIRSPY_WATCHDOG: wIndex 1 feeds the watchdog and reports */
 #define AIRSPY_WATCHDOG_FLAG_ARMED (1 << 0)             /* the watchdog is running */

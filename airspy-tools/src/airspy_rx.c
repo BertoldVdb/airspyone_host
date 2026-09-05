@@ -242,6 +242,10 @@ uint32_t framing_val = 1;
 uint32_t watchdog_val = 0;
 bool framing_given = false;
 airspy_transfer_metadata_t frame_meta;
+uint32_t uart_bytes_total = 0;
+bool uart_baud_given = false;
+uint32_t uart_baud_val = 0;
+uint32_t print_uart_val = 0;
 bool calibration_given = false;
 int32_t calibration_val = 0;
 uint64_t frame_gap_samples = 0;
@@ -381,6 +385,12 @@ int rx_callback(airspy_transfer_t* transfer)
 		{
 			frame_gap_samples += meta.gap_samples;
 			frame_meta = meta;
+			if (meta.uart_len)
+			{
+				uart_bytes_total += meta.uart_len;
+				if (print_uart_val)
+					fwrite(meta.uart_data, 1, meta.uart_len, stderr);
+			}
 			frame_blocks++;
 		}
 	}
@@ -563,7 +573,6 @@ int main(int argc, char** argv)
 	double freq_hz_temp;
 	char str[20];
 
-	while( (opt = getopt(argc, argv, "r:ws:p:F:W:f:a:t:b:v:m:l:g:h:n:d")) != EOF )
 	while( (opt = getopt(argc, argv, "r:ws:p:F:W:B:N:C:f:a:t:b:v:m:l:g:h:n:d")) != EOF )
 	{
 		result = AIRSPY_SUCCESS;
@@ -596,8 +605,13 @@ int main(int argc, char** argv)
 				calibration_val = (int32_t)strtol(optarg, NULL, 10);
 				break;
 
+			case 'B': /* uart baud */
+				uart_baud_given = true;
+				result = parse_u32(optarg, &uart_baud_val);
 				break;
 
+			case 'N': /* print uart bytes */
+				result = parse_u32(optarg, &print_uart_val);
 				break;
 
 			case 'F': /* framing */
@@ -1001,9 +1015,12 @@ int main(int argc, char** argv)
 			printf("airspy_set_calibration() failed: %s (%d)\n", airspy_error_name(result), result);
 		}
 	}
+	if (uart_baud_given)
 	{
+		result = airspy_set_uart_baud(device, uart_baud_val);
 		if (result != AIRSPY_SUCCESS)
 		{
+			printf("airspy_set_uart_baud() failed: %s (%d)\n", airspy_error_name(result), result);
 		}
 	}
 
@@ -1129,10 +1146,8 @@ int main(int argc, char** argv)
 		fprintf(stderr, "Streaming at %5s MSPS\n", str);
 		if (airspy_get_stream_status(device, &stream_status) == AIRSPY_SUCCESS)
 		{
-			fprintf(stderr, "Device ring: backlog max %u of %u chunks (device queue lag max %u), lost %u, overruns %u, dma errors %u, usb errors %u, adc overflows %u\n",
-				stream_status.backlog_max, stream_status.ring_chunks, stream_status.m0_lag_max, stream_status.lost, stream_status.overruns, stream_status.dma_errors, stream_status.usb_errors, stream_status.adc_overflows);
-			fprintf(stderr, "Device ring: backlog max %u of %u chunks (device queue lag max %u), lost %u, overruns %u\n",
-				stream_status.backlog_max, stream_status.ring_chunks, stream_status.m0_lag_max, stream_status.lost, stream_status.overruns);
+			fprintf(stderr, "Device ring: backlog max %u of %u chunks (device queue lag max %u), lost %u, overruns %u, dma errors %u, usb errors %u, adc overflows %u, pps %u\n",
+				stream_status.backlog_max, stream_status.ring_chunks, stream_status.m0_lag_max, stream_status.lost, stream_status.overruns, stream_status.dma_errors, stream_status.usb_errors, stream_status.adc_overflows, stream_status.pps_count);
 		}
 		if (watchdog_val)
 		{
@@ -1140,7 +1155,8 @@ int main(int argc, char** argv)
 			if (airspy_watchdog_feed(device, &wd) == AIRSPY_SUCCESS)
 			{
 				if (wd.flags & AIRSPY_WATCHDOG_FLAG_ARMED)
-					fprintf(stderr, "Watchdog: armed%s, timeout %u ms, %u ms were left before this feed%s\n",
+					fprintf(stderr, "Watchdog: armed%s%s, timeout %u ms, %u ms were left before this feed%s\n",
+						(wd.flags & AIRSPY_WATCHDOG_FLAG_STRICT) ? ", strict" : ", relaxed",
 						(wd.flags & AIRSPY_WATCHDOG_FLAG_HOST_OWNED) ? ", host in charge" : "",
 						wd.timeout_ms, wd.remaining_ms, (wd.flags & AIRSPY_WATCHDOG_FLAG_RESET_BY_WATCHDOG) ? ", last reset was the watchdog" : "");
 				else
@@ -1152,6 +1168,14 @@ int main(int argc, char** argv)
 			fprintf(stderr, "Frames: sample index %llu, gap samples %llu, sync errors %u, chunks per block %u, freq %u Hz\n",
 				(unsigned long long)frame_meta.sample_index, (unsigned long long)frame_gap_samples,
 				frame_meta.sync_errors, frame_meta.chunks, frame_meta.freq_hz);
+			if (frame_meta.pps_count)
+			{
+				fprintf(stderr, "PPS: %u edges, last at sample %llu + %.4f (%.6f s before this block), uart bytes %u\n",
+					frame_meta.pps_count, (unsigned long long)frame_meta.pps_sample_index,
+					frame_meta.pps_fraction / 4294967296.0,
+					(double)(frame_meta.sample_index - frame_meta.pps_sample_index) / (2.0 * sample_rate_val),
+					uart_bytes_total);
+			}
 		}
 		if ((limit_num_samples == true) && (bytes_to_xfer == 0))
 			do_exit = true;

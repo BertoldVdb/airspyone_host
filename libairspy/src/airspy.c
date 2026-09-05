@@ -23,12 +23,12 @@ HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABI
 ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
-#ifndef _WIN32
-#include <unistd.h>
-#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 #include <libusb.h>
 
 #if _MSC_VER > 1700  // To avoid error with Visual Studio 2017/2019 or more define which define timespec as it is already defined in pthread.h
@@ -481,6 +481,7 @@ static int deframe_buffer(airspy_device_t* device, const uint8_t* raw)
 	airspy_transfer_metadata_t* m = &device->meta;
 	uint32_t c;
 	uint32_t good = 0;
+	m->uart_len = 0;
 	size_t out_bytes = 0;
 
 	m->chunks = 0;
@@ -515,6 +516,20 @@ static int deframe_buffer(airspy_device_t* device, const uint8_t* raw)
 		device->expected_sample_index_valid = true;
 		m->lost_chunks = TO_LE(w[6]);
 		m->overrun_chunks = TO_LE(w[7]);
+		m->pps_sample_index = ((uint64_t)TO_LE(w[10]) << 32) | TO_LE(w[9]);
+		m->pps_fraction = TO_LE(w[11]);
+		m->pps_count = TO_LE(w[12]);
+		{
+			const uint8_t* b = (const uint8_t*)&w[13];
+			uint32_t n = b[0];
+			if (n > AIRSPY_FRAME_UART_BYTES)
+				n = AIRSPY_FRAME_UART_BYTES;
+			if (m->uart_len + n <= AIRSPY_METADATA_UART_MAX)
+			{
+				memcpy(&m->uart_data[m->uart_len], &b[1], n);
+				m->uart_len += n;
+			}
+		}
 
 		memcpy(device->framed_samples + out_bytes, chunk + AIRSPY_FRAME_HEADER_SIZE, payload);
 		out_bytes += payload;
@@ -2246,6 +2261,15 @@ int airspy_list_devices(uint64_t *serials, int count)
 		return AIRSPY_SUCCESS;
 	}
 
+	int ADDCALL airspy_watchdog_status(airspy_device_t* device, airspy_watchdog_status_t* status)
+	{
+		return airspy_watchdog_request(device, 0, status);
+	}
+
+	int ADDCALL airspy_watchdog_feed(airspy_device_t* device, airspy_watchdog_status_t* status)
+	{
+		return airspy_watchdog_request(device, 1, status);
+	}
 
 	int ADDCALL airspy_transfer_get_metadata(airspy_transfer* transfer, airspy_transfer_metadata_t* metadata)
 	{
@@ -2330,6 +2354,76 @@ int airspy_list_devices(uint64_t *serials, int count)
 } // __cplusplus defined.
 #endif
 
+int ADDCALL airspy_set_uart_baud(struct airspy_device* device, uint32_t baud)
+{
+	int result = libusb_control_transfer(
+		device->usb_device,
+		LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+		AIRSPY_SET_UART_BAUD,
+		baud & 0xFFFF,
+		baud >> 16,
+		NULL,
+		0,
+		0);
+	if (result != 0)
+		return AIRSPY_ERROR_LIBUSB;
+	return AIRSPY_SUCCESS;
+}
+
+int ADDCALL airspy_uart_write(struct airspy_device* device, const uint8_t* data, uint16_t len)
+{
+	int result;
+	if (len == 0 || len > 64)
+		return AIRSPY_ERROR_INVALID_PARAM;
+	result = libusb_control_transfer(
+		device->usb_device,
+		LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+		AIRSPY_UART_WRITE,
+		0,
+		0,
+		(unsigned char*)data,
+		len,
+		0);
+	if (result < len)
+		return AIRSPY_ERROR_LIBUSB;
+	return AIRSPY_SUCCESS;
+}
+
+int ADDCALL airspy_set_calibration(struct airspy_device* device, int32_t correction_ppb)
+{
+	uint32_t v = (uint32_t)correction_ppb;
+	int result = libusb_control_transfer(
+		device->usb_device,
+		LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+		AIRSPY_SET_CALIBRATION,
+		v & 0xFFFF,
+		v >> 16,
+		NULL,
+		0,
+		0);
+	if (result != 0)
+		return AIRSPY_ERROR_LIBUSB;
+	return AIRSPY_SUCCESS;
+}
+
+int ADDCALL airspy_get_calibration(struct airspy_device* device, airspy_calibration_t* calibration)
+{
+	int result = libusb_control_transfer(
+		device->usb_device,
+		LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+		AIRSPY_GET_CALIBRATION,
+		0,
+		0,
+		(unsigned char*)calibration,
+		sizeof(airspy_calibration_t),
+		0);
+	if (result < (int)sizeof(airspy_calibration_t))
+		return AIRSPY_ERROR_LIBUSB;
+	calibration->correction_ppb = (int32_t)TO_LE((uint32_t)calibration->correction_ppb);
+	calibration->source = TO_LE(calibration->source);
+	return AIRSPY_SUCCESS;
+}
+
 int ADDCALL airspy_mem_read(struct airspy_device* device, uint32_t address, void* data, uint16_t len)
 {
 	int result;
@@ -2413,48 +2507,4 @@ int ADDCALL airspy_call(struct airspy_device* device, uint32_t core, uint32_t ad
 #endif
 		waited++;
 	}
-}
-
-	int ADDCALL airspy_watchdog_status(airspy_device_t* device, airspy_watchdog_status_t* status)
-	{
-		return airspy_watchdog_request(device, 0, status);
-	}
-
-	int ADDCALL airspy_watchdog_feed(airspy_device_t* device, airspy_watchdog_status_t* status)
-	{
-		return airspy_watchdog_request(device, 1, status);
-	}
-int ADDCALL airspy_set_calibration(struct airspy_device* device, int32_t correction_ppb)
-{
-	uint32_t v = (uint32_t)correction_ppb;
-	int result = libusb_control_transfer(
-		device->usb_device,
-		LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-		AIRSPY_SET_CALIBRATION,
-		v & 0xFFFF,
-		v >> 16,
-		NULL,
-		0,
-		0);
-	if (result != 0)
-		return AIRSPY_ERROR_LIBUSB;
-	return AIRSPY_SUCCESS;
-}
-
-int ADDCALL airspy_get_calibration(struct airspy_device* device, airspy_calibration_t* calibration)
-{
-	int result = libusb_control_transfer(
-		device->usb_device,
-		LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
-		AIRSPY_GET_CALIBRATION,
-		0,
-		0,
-		(unsigned char*)calibration,
-		sizeof(airspy_calibration_t),
-		0);
-	if (result < (int)sizeof(airspy_calibration_t))
-		return AIRSPY_ERROR_LIBUSB;
-	calibration->correction_ppb = (int32_t)TO_LE((uint32_t)calibration->correction_ppb);
-	calibration->source = TO_LE(calibration->source);
-	return AIRSPY_SUCCESS;
 }
