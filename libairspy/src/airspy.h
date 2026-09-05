@@ -129,6 +129,18 @@ typedef struct {
 	uint32_t m0_lag_max; /* worst lag of the device's own USB queuing behind the ADC, in chunks */
 } airspy_stream_status_t;
 
+/* Metadata of the block delivered to the sample callback */
+typedef struct {
+	uint64_t sample_index; /* device sample index of the first sample of this block */
+	uint64_t gap_samples; /* samples missing between the previous block and this one */
+	uint32_t chunks;         /* device chunks in this block */
+	uint32_t lost_chunks; /* chunks the device lost since the stream started */
+	uint32_t overrun_chunks; /* chunks the device delivered corrupted since the stream started */
+	uint32_t sync_errors; /* chunks with an invalid header since the stream started */
+	uint32_t freq_hz;
+	uint32_t flags;          /* AIRSPY_FRAME_FLAG_* of the first chunk */
+} airspy_transfer_metadata_t;
+
 typedef int (*airspy_sample_block_cb_fn)(airspy_transfer* transfer);
 
 extern ADDAPI void ADDCALL airspy_lib_version(airspy_lib_version_t* lib_version);
@@ -231,6 +243,12 @@ extern ADDAPI int ADDCALL airspy_set_packing(struct airspy_device* device, uint8
 
 /* Read the device stream counters */
 extern ADDAPI int ADDCALL airspy_get_stream_status(struct airspy_device* device, airspy_stream_status_t* status);
+
+/* Framed chunks: the library asks the device, at every airspy_start_rx() */
+extern ADDAPI int ADDCALL airspy_set_framing(struct airspy_device* device, uint8_t value);
+
+/* Fill in the metadata of the block a sample callback is being called with */
+extern ADDAPI int ADDCALL airspy_transfer_get_metadata(airspy_transfer* transfer, airspy_transfer_metadata_t* metadata);
 
 extern ADDAPI const char* ADDCALL airspy_error_name(enum airspy_error errcode);
 extern ADDAPI const char* ADDCALL airspy_board_id_name(enum airspy_board_id board_id);

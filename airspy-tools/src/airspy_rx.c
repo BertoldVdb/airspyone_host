@@ -238,6 +238,11 @@ uint64_t bytes_to_xfer = 0;
 
 bool call_set_packing = false;
 uint32_t packing_val = 0;
+uint32_t framing_val = 1;
+bool framing_given = false;
+airspy_transfer_metadata_t frame_meta;
+uint64_t frame_gap_samples = 0;
+uint32_t frame_blocks = 0;
 
 bool sample_rate = false;
 uint32_t sample_rate_val;
@@ -367,6 +372,16 @@ int rx_callback(airspy_transfer_t* transfer)
 	struct timeval time_now;
 	float time_difference, rate;
 
+	{
+		airspy_transfer_metadata_t meta;
+		if (airspy_transfer_get_metadata(transfer, &meta) == AIRSPY_SUCCESS)
+		{
+			frame_gap_samples += meta.gap_samples;
+			frame_meta = meta;
+			frame_blocks++;
+		}
+	}
+
 	if( fd != NULL ) 
 	{
 		switch(sample_type_val)
@@ -474,6 +489,7 @@ static void usage(void)
 	fprintf(stderr, " This is for SDR# compatibility and may not work with other software\n");
 	fprintf(stderr, "[-s serial_number_64bits]: Open device with specified 64bits serial number\n");
 	fprintf(stderr, "[-p packing]: Set packing for samples, \n");
+	fprintf(stderr, "[-F framing]: Framed chunks with sample counters, 1=enabled(default, if the firmware supports it), 0=disabled\n");
 	fprintf(stderr, " 1=enabled(12bits packed), 0=disabled(default 16bits not packed)\n");
 	fprintf(stderr, "[-f frequency_MHz]: Set frequency in MHz between [%lu, %lu] (default %luMHz)\n",
 		FREQ_HZ_MIN / FREQ_ONE_MHZ, FREQ_HZ_MAX / FREQ_ONE_MHZ, DEFAULT_FREQ_HZ / FREQ_ONE_MHZ);
@@ -538,7 +554,7 @@ int main(int argc, char** argv)
 	double freq_hz_temp;
 	char str[20];
 
-	while( (opt = getopt(argc, argv, "r:ws:p:f:a:t:b:v:m:l:g:h:n:d")) != EOF )
+	while( (opt = getopt(argc, argv, "r:ws:p:F:f:a:t:b:v:m:l:g:h:n:d")) != EOF )
 	{
 		result = AIRSPY_SUCCESS;
 		switch( opt ) 
@@ -556,6 +572,15 @@ int main(int argc, char** argv)
 				serial_number = true;
 				result = parse_u64(optarg, &serial_number_val);
 			break;
+
+			case 'F': /* framing */
+				framing_given = true;
+				result = parse_u32(optarg, &framing_val);
+				if (result == AIRSPY_SUCCESS && framing_val > 1)
+				{
+					result = AIRSPY_ERROR_INVALID_PARAM;
+				}
+				break;
 
 			case 'p': /* packing */
 				result = parse_u32(optarg, &packing_val_u32);
@@ -940,6 +965,17 @@ int main(int argc, char** argv)
 		}
 	}
 
+	if (framing_given)
+	{
+		result = airspy_set_framing(device, (uint8_t)framing_val);
+		if( result != AIRSPY_SUCCESS ) {
+			fprintf(stderr, "airspy_set_framing() failed: %s (%d)\n", airspy_error_name(result), result);
+			airspy_close(device);
+			airspy_exit();
+			return EXIT_FAILURE;
+		}
+	}
+
 	result = airspy_set_rf_bias(device, biast_val);
 	if( result != AIRSPY_SUCCESS ) {
 		fprintf(stderr, "airspy_set_rf_bias() failed: %s (%d)\n", airspy_error_name(result), result);
@@ -1053,6 +1089,12 @@ int main(int argc, char** argv)
 		{
 			fprintf(stderr, "Device ring: backlog max %u of %u chunks (device queue lag max %u), lost %u, overruns %u\n",
 				stream_status.backlog_max, stream_status.ring_chunks, stream_status.m0_lag_max, stream_status.lost, stream_status.overruns);
+		}
+		if (frame_blocks)
+		{
+			fprintf(stderr, "Frames: sample index %llu, gap samples %llu, sync errors %u, chunks per block %u, freq %u Hz\n",
+				(unsigned long long)frame_meta.sample_index, (unsigned long long)frame_gap_samples,
+				frame_meta.sync_errors, frame_meta.chunks, frame_meta.freq_hz);
 		}
 		if ((limit_num_samples == true) && (bytes_to_xfer == 0))
 			do_exit = true;

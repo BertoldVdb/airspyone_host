@@ -106,6 +106,13 @@ typedef struct airspy_device
 	void *output_buffer;
 	uint16_t *unpacked_samples;
 	bool packing_enabled;
+	bool framing_requested;
+	bool framing_active;
+	uint8_t *framed_samples;
+	airspy_transfer_metadata_t meta;
+	bool meta_valid;
+	uint64_t expected_sample_index;
+	bool expected_sample_index_valid;
 	iqconverter_float_t *cnv_f;
 	iqconverter_int16_t *cnv_i;
 	void* ctx;
@@ -180,6 +187,12 @@ static int free_transfers(airspy_device_t* device)
 			device->unpacked_samples = NULL;
 		}
 
+		if (device->framed_samples != NULL)
+		{
+			free(device->framed_samples);
+			device->framed_samples = NULL;
+		}
+
 		for (i = 0; i < RAW_BUFFER_COUNT; i++)
 		{
 			if (device->received_samples_queue[i] != NULL)
@@ -234,6 +247,12 @@ static int allocate_transfers(airspy_device_t* const device)
 			{
 				return AIRSPY_ERROR_NO_MEM;
 			}
+		}
+
+		device->framed_samples = (uint8_t*)malloc(device->buffer_size);
+		if (device->framed_samples == NULL)
+		{
+			return AIRSPY_ERROR_NO_MEM;
 		}
 
 		device->transfers = (struct libusb_transfer**) calloc(device->transfer_count, sizeof(struct libusb_transfer));
@@ -340,6 +359,82 @@ static inline void unpack_samples(uint32_t *input, uint16_t *output, int length)
 	}
 }
 
+static int send_framing(airspy_device_t* device, uint8_t value)
+{
+int result;
+uint8_t retval;
+
+result = libusb_control_transfer(
+	device->usb_device,
+	LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+	AIRSPY_SET_FRAMING,
+	0,
+	value ? 1 : 0,
+	&retval,
+	1,
+	LIBUSB_CTRL_TIMEOUT_MS);
+
+if (result < 1)
+{
+	return AIRSPY_ERROR_LIBUSB;
+}
+return AIRSPY_SUCCESS;
+}
+
+static int deframe_buffer(airspy_device_t* device, const uint8_t* raw)
+{
+	const uint32_t wire = device->packing_enabled ? AIRSPY_FRAME_WIRE_PACKED : AIRSPY_FRAME_WIRE_UNPACKED;
+	const uint32_t payload = wire - AIRSPY_FRAME_HEADER_SIZE;
+	const uint32_t samples_per_chunk = device->packing_enabled ? (payload / 3) * 2 : payload / 2;
+	const uint32_t chunks = device->buffer_size / wire;
+	airspy_transfer_metadata_t* m = &device->meta;
+	uint32_t c;
+	uint32_t good = 0;
+	size_t out_bytes = 0;
+
+	m->chunks = 0;
+	m->gap_samples = 0;
+
+	for (c = 0; c < chunks; c++)
+	{
+		const uint8_t* chunk = raw + (size_t)c * wire;
+		const uint32_t* w = (const uint32_t*)chunk; /* header words, little-endian on the wire */
+		uint64_t index;
+		uint32_t count;
+
+		if (TO_LE(w[2]) != AIRSPY_FRAME_MAGIC)
+		{
+			m->sync_errors++;
+			continue;
+		}
+		index = ((uint64_t)TO_LE(w[1]) << 32) | TO_LE(w[0]);
+		count = TO_LE(w[4]);
+
+		if (good == 0)
+		{
+			m->sample_index = index;
+			m->flags = TO_LE(w[5]);
+			m->freq_hz = TO_LE(w[8]);
+		}
+		if (device->expected_sample_index_valid && index > device->expected_sample_index)
+		{
+			m->gap_samples += index - device->expected_sample_index;
+		}
+		device->expected_sample_index = index + count;
+		device->expected_sample_index_valid = true;
+		m->lost_chunks = TO_LE(w[6]);
+		m->overrun_chunks = TO_LE(w[7]);
+
+		memcpy(device->framed_samples + out_bytes, chunk + AIRSPY_FRAME_HEADER_SIZE, payload);
+		out_bytes += payload;
+		good++;
+	}
+
+	m->chunks = good;
+	device->meta_valid = (good > 0);
+	return (int)(good * samples_per_chunk);
+}
+
 static void* consumer_threadproc(void *arg)
 {
 	int sample_count;
@@ -373,20 +468,30 @@ static void* consumer_threadproc(void *arg)
 
 		pthread_mutex_unlock(&device->consumer_mp);
 
-		if (device->packing_enabled)
+		if (device->framing_active)
+		{
+			sample_count = deframe_buffer(device, (const uint8_t*)input_samples);
+			if (sample_count == 0)
+			{
+				pthread_mutex_lock(&device->consumer_mp);
+				device->received_buffer_count--;
+				continue;
+			}
+			input_samples = (uint16_t*)device->framed_samples;
+		}
+		else if (device->packing_enabled)
 		{
 			sample_count = ((device->buffer_size / 2) * 4) / 3;
-
-			if (device->sample_type != AIRSPY_SAMPLE_RAW)
-			{
-				unpack_samples((uint32_t*)input_samples, device->unpacked_samples, sample_count);
-
-				input_samples = device->unpacked_samples;
-			}
 		}
 		else
 		{
 			sample_count = device->buffer_size / 2;
+		}
+
+		if (device->packing_enabled && device->sample_type != AIRSPY_SAMPLE_RAW)
+		{
+			unpack_samples((uint32_t*)input_samples, device->unpacked_samples, sample_count);
+			input_samples = device->unpacked_samples;
 		}
 
 		switch (device->sample_type)
@@ -885,6 +990,12 @@ static int airspy_open_init(airspy_device_t** device, uint64_t serial_number, in
 	lib_device->transfer_count = 16;
 	lib_device->buffer_size = 262144;
 	lib_device->packing_enabled = false;
+	lib_device->framing_requested = true;
+	lib_device->framing_active = false;
+	lib_device->framed_samples = NULL;
+	lib_device->meta_valid = false;
+	lib_device->expected_sample_index_valid = false;
+	memset(&lib_device->meta, 0, sizeof(lib_device->meta));
 	lib_device->streaming = false;
 	lib_device->stop_requested = false;
 	lib_device->sample_type = AIRSPY_SAMPLE_FLOAT32_IQ;
@@ -1201,6 +1312,9 @@ int airspy_list_devices(uint64_t *serials, int count)
 
 		memset(device->dropped_buffers_queue, 0, RAW_BUFFER_COUNT * sizeof(uint32_t));
 		device->dropped_buffers = 0;
+		memset(&device->meta, 0, sizeof(device->meta));
+		device->meta_valid = false;
+		device->expected_sample_index_valid = false;
 
 		result = airspy_set_receiver_mode(device, RECEIVER_MODE_OFF);
 		if (result != AIRSPY_SUCCESS)
@@ -1209,6 +1323,12 @@ int airspy_list_devices(uint64_t *serials, int count)
 		}
 
 		libusb_clear_halt(device->usb_device, LIBUSB_ENDPOINT_IN | 1);
+
+		device->framing_active = false;
+		if (device->framing_requested)
+		{
+			device->framing_active = (send_framing(device, 1) == AIRSPY_SUCCESS);
+		}
 
 		result = airspy_set_receiver_mode(device, RECEIVER_MODE_RX);
 		if (result == AIRSPY_SUCCESS)
@@ -1972,6 +2092,37 @@ int airspy_list_devices(uint64_t *serials, int count)
 			}
 		}
 
+		return AIRSPY_SUCCESS;
+	}
+
+	int ADDCALL airspy_set_framing(airspy_device_t* device, uint8_t value)
+	{
+		if (device->streaming)
+		{
+			return AIRSPY_ERROR_BUSY;
+		}
+		device->framing_requested = value ? true : false;
+		if (device->framing_requested)
+		{
+			return send_framing(device, 1);
+		}
+		return AIRSPY_SUCCESS;
+	}
+
+	int ADDCALL airspy_transfer_get_metadata(airspy_transfer* transfer, airspy_transfer_metadata_t* metadata)
+	{
+		airspy_device_t* device;
+
+		if (transfer == NULL || metadata == NULL || transfer->device == NULL)
+		{
+			return AIRSPY_ERROR_INVALID_PARAM;
+		}
+		device = transfer->device;
+		if (!device->framing_active || !device->meta_valid)
+		{
+			return AIRSPY_ERROR_UNSUPPORTED;
+		}
+		*metadata = device->meta;
 		return AIRSPY_SUCCESS;
 	}
 
