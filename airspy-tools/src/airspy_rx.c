@@ -415,7 +415,11 @@ int rx_callback(airspy_transfer_t* transfer)
 				break;
 
 			case AIRSPY_SAMPLE_RAW:
-				if (packing_val)
+				if (packing_val == 2)
+				{
+					bytes_to_write = transfer->sample_count; /* 8-bit: one byte per sample */
+				}
+				else if (packing_val)
 				{
 					bytes_to_write = transfer->sample_count * INT12_EL_SIZE_BITS / INT8_EL_SIZE_BITS;
 				}
@@ -610,6 +614,7 @@ int main(int argc, char** argv)
 				{
 					case 0:
 					case 1:
+					case 2:
 						packing_val = packing_val_u32;
 						call_set_packing = true;
 					break;

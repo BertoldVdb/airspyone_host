@@ -242,6 +242,7 @@ extern ADDAPI int ADDCALL airspy_set_sensitivity_gain(struct airspy_device* devi
 extern ADDAPI int ADDCALL airspy_set_rf_bias(struct airspy_device* dev, uint8_t value);
 
 /* Parameter value shall be 0=Disable Packing or 1=Enable Packing */
+/* 0 = 16-bit samples, 1 = 12-bit packed, 2 = 8-bit */
 extern ADDAPI int ADDCALL airspy_set_packing(struct airspy_device* device, uint8_t value);
 
 /* Read the device stream counters */

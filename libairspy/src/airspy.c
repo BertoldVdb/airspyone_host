@@ -106,6 +106,7 @@ typedef struct airspy_device
 	void *output_buffer;
 	uint16_t *unpacked_samples;
 	bool packing_enabled;
+	uint8_t packing_mode; /* 0 = 16-bit, 1 = 12-bit packed, 2 = 8-bit */
 	bool dev_mem_buffers;
 	bool framing_requested;
 	bool framing_active;
@@ -303,7 +304,11 @@ static int allocate_transfers(airspy_device_t* const device)
 		}
 	}
 
-	if (device->packing_enabled)
+	if (device->packing_mode == 2)
+	{
+		sample_count = device->buffer_size;
+	}
+	else if (device->packing_enabled)
 	{
 		sample_count = ((device->buffer_size / 2) * 4) / 3;
 	}
@@ -460,11 +465,18 @@ if (result < 1)
 return AIRSPY_SUCCESS;
 }
 
+static inline void unpack_samples_8bit(const uint8_t *input, uint16_t *output, int length)
+{
+	int i;
+	for (i = 0; i < length; i++)
+		output[i] = (uint16_t)input[i] << 4;
+}
+
 static int deframe_buffer(airspy_device_t* device, const uint8_t* raw)
 {
-	const uint32_t wire = device->packing_enabled ? AIRSPY_FRAME_WIRE_PACKED : AIRSPY_FRAME_WIRE_UNPACKED;
+	const uint32_t wire = device->packing_mode == 2 ? AIRSPY_FRAME_WIRE_8BIT : device->packing_enabled ? AIRSPY_FRAME_WIRE_PACKED : AIRSPY_FRAME_WIRE_UNPACKED;
 	const uint32_t payload = wire - AIRSPY_FRAME_HEADER_SIZE;
-	const uint32_t samples_per_chunk = device->packing_enabled ? (payload / 3) * 2 : payload / 2;
+	const uint32_t samples_per_chunk = device->packing_mode == 2 ? payload : device->packing_enabled ? (payload / 3) * 2 : payload / 2;
 	const uint32_t chunks = device->buffer_size / wire;
 	airspy_transfer_metadata_t* m = &device->meta;
 	uint32_t c;
@@ -558,6 +570,10 @@ static void* consumer_threadproc(void *arg)
 			}
 			input_samples = (uint16_t*)device->framed_samples;
 		}
+		else if (device->packing_mode == 2)
+		{
+			sample_count = device->buffer_size;
+		}
 		else if (device->packing_enabled)
 		{
 			sample_count = ((device->buffer_size / 2) * 4) / 3;
@@ -567,7 +583,12 @@ static void* consumer_threadproc(void *arg)
 			sample_count = device->buffer_size / 2;
 		}
 
-		if (device->packing_enabled && device->sample_type != AIRSPY_SAMPLE_RAW)
+		if (device->packing_mode == 2 && device->sample_type != AIRSPY_SAMPLE_RAW)
+		{
+			unpack_samples_8bit((const uint8_t*)input_samples, device->unpacked_samples, sample_count);
+			input_samples = device->unpacked_samples;
+		}
+		else if (device->packing_enabled && device->sample_type != AIRSPY_SAMPLE_RAW)
 		{
 			unpack_samples((uint32_t*)input_samples, device->unpacked_samples, sample_count);
 			input_samples = device->unpacked_samples;
@@ -1069,6 +1090,7 @@ static int airspy_open_init(airspy_device_t** device, uint64_t serial_number, in
 	lib_device->transfer_count = 16;
 	lib_device->buffer_size = 262144;
 	lib_device->packing_enabled = false;
+	lib_device->packing_mode = 0;
 	lib_device->dev_mem_buffers = false;
 	lib_device->framing_requested = true;
 	{
@@ -2162,13 +2184,14 @@ int airspy_list_devices(uint64_t *serials, int count)
 		}
 
 		packing_enabled = value ? true : false;
-		if (packing_enabled != device->packing_enabled)
+		if (value != device->packing_mode)
 		{
 			cancel_transfers(device);
 			free_transfers(device);
 
 			device->packing_enabled = packing_enabled;
-			device->buffer_size = packing_enabled ? (6144 * 24) : 262144;
+			device->packing_mode = value;
+			device->buffer_size = value == 2 ? (4096 * 36) : packing_enabled ? (6144 * 24) : 262144;
 
 			result = allocate_transfers(device);
 			if (result != 0)
