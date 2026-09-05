@@ -495,7 +495,8 @@ static void usage(void)
 	fprintf(stderr, "-w Receive data into file with WAV header and automatic name\n");
 	fprintf(stderr, " This is for SDR# compatibility and may not work with other software\n");
 	fprintf(stderr, "[-s serial_number_64bits]: Open device with specified 64bits serial number\n");
-	fprintf(stderr, "[-p packing]: Set packing for samples, \n");
+	fprintf(stderr, "[-p packing]: 0 = 16-bit samples (default), 1 = 12-bit packed, 2 = 8-bit (top 8 bits),\n");
+	fprintf(stderr, "\te.g. -a 15000000 -p 2 streams 15 MSPS IQ (30 MSPS real) at the 30 MB/s of 10 MSPS packed\n");
 	fprintf(stderr, "[-F framing]: Framed chunks with sample counters, 1=enabled(default, if the firmware supports it), 0=disabled\n");
 	fprintf(stderr, "[-W watchdog]: 1=feed the device watchdog every second and show its state, 0=disabled(default)\n");
 	fprintf(stderr, " 1=enabled(12bits packed), 0=disabled(default 16bits not packed)\n");
