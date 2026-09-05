@@ -44,7 +44,7 @@ typedef enum
 {
     AIRSPY_SAMPLERATE_10MSPS = 0, /* 12bits 10MHz IQ */
     AIRSPY_SAMPLERATE_2_5MSPS = 1, /* 12bits 2.5MHz IQ */
-    AIRSPY_SAMPLERATE_END = 2 /* End index for sample rate (corresponds to number of samplerate) */
+  AIRSPY_SAMPLERATE_END = 2 /* End index for sample rate (corresponds to number of samplerate) */
 } airspy_samplerate_t;
 
 
@@ -54,36 +54,37 @@ typedef enum
 #define AIRSPY_CMD_MAX (37)
 typedef enum
 {
-    AIRSPY_INVALID                    = 0 ,
-    AIRSPY_RECEIVER_MODE              = 1 ,
+  AIRSPY_INVALID                    = 0 ,
+  AIRSPY_RECEIVER_MODE              = 1 ,
     AIRSPY_SI5351C_WRITE              = 2 ,
     AIRSPY_SI5351C_READ               = 3 ,
     AIRSPY_R820T_WRITE                = 4 ,
     AIRSPY_R820T_READ                 = 5 ,
-    AIRSPY_SPIFLASH_ERASE             = 6 ,
-    AIRSPY_SPIFLASH_WRITE             = 7 ,
-    AIRSPY_SPIFLASH_READ              = 8 ,
-    AIRSPY_BOARD_ID_READ              = 9 ,
-    AIRSPY_VERSION_STRING_READ        = 10,
-    AIRSPY_BOARD_PARTID_SERIALNO_READ = 11,
-    AIRSPY_SET_SAMPLERATE             = 12,
-    AIRSPY_SET_FREQ                   = 13,
-    AIRSPY_SET_LNA_GAIN               = 14,
-    AIRSPY_SET_MIXER_GAIN             = 15,
-    AIRSPY_SET_VGA_GAIN               = 16,
-    AIRSPY_SET_LNA_AGC                = 17,
-    AIRSPY_SET_MIXER_AGC              = 18,
-    AIRSPY_MS_VENDOR_CMD              = 19,
-    AIRSPY_SET_RF_BIAS_CMD            = 20,
-    AIRSPY_GPIO_WRITE                 = 21,
-    AIRSPY_GPIO_READ                  = 22,
-    AIRSPY_GPIODIR_WRITE              = 23,
-    AIRSPY_GPIODIR_READ               = 24,
-    AIRSPY_GET_SAMPLERATES            = 25,
-    AIRSPY_SET_PACKING                = 26,
-    AIRSPY_SPIFLASH_ERASE_SECTOR      = 27,
+  AIRSPY_SPIFLASH_ERASE             = 6 ,
+  AIRSPY_SPIFLASH_WRITE             = 7 ,
+  AIRSPY_SPIFLASH_READ              = 8 ,
+  AIRSPY_BOARD_ID_READ              = 9 ,
+  AIRSPY_VERSION_STRING_READ        = 10,
+  AIRSPY_BOARD_PARTID_SERIALNO_READ = 11,
+  AIRSPY_SET_SAMPLERATE             = 12,
+  AIRSPY_SET_FREQ                   = 13,
+  AIRSPY_SET_LNA_GAIN               = 14,
+  AIRSPY_SET_MIXER_GAIN             = 15,
+  AIRSPY_SET_VGA_GAIN               = 16,
+  AIRSPY_SET_LNA_AGC                = 17,
+  AIRSPY_SET_MIXER_AGC              = 18,
+  AIRSPY_MS_VENDOR_CMD              = 19,
+  AIRSPY_SET_RF_BIAS_CMD            = 20,
+  AIRSPY_GPIO_WRITE                 = 21,
+  AIRSPY_GPIO_READ                  = 22,
+  AIRSPY_GPIODIR_WRITE              = 23,
+  AIRSPY_GPIODIR_READ               = 24,
+  AIRSPY_GET_SAMPLERATES            = 25,
+  AIRSPY_SET_PACKING                = 26,
+  AIRSPY_SPIFLASH_ERASE_SECTOR      = 27,
   AIRSPY_GET_STREAM_STATUS          = 28, /* IN: airspy_stream_status_t */
   AIRSPY_SET_FRAMING                = 29, /* wIndex 1 = on, 0 = off; cleared at every stream stop */
+  AIRSPY_WATCHDOG                   = 30, /* IN: airspy_watchdog_status_t; wIndex 1 also feeds it */
   AIRSPY_MEM_READ                   = 35, /* IN: wValue | wIndex << 16 = address, wLength <= 64 bytes */
   AIRSPY_MEM_WRITE                  = 36, /* OUT: same addressing, data = bytes to write */
   AIRSPY_CALL                       = AIRSPY_CMD_MAX /* OUT: airspy_call_request_t runs a function; IN: airspy_call_result_t */
@@ -123,6 +124,22 @@ typedef struct
 /* Chunk size on the wire, framed or not */
 #define AIRSPY_FRAME_WIRE_UNPACKED (16384)
 #define AIRSPY_FRAME_WIRE_PACKED (6144)
+
+/* AIRSPY_WATCHDOG: wIndex 1 feeds the watchdog and reports */
+#define AIRSPY_WATCHDOG_FLAG_ARMED (1 << 0)             /* the watchdog is running */
+#define AIRSPY_WATCHDOG_FLAG_RESET_BY_WATCHDOG (1 << 1) /* the last reset was a watchdog time-out (best effort) */
+#define AIRSPY_WATCHDOG_FLAG_HOST_OWNED (1 << 2) /* strict mode: the host has made contact, only the host feeds */
+#define AIRSPY_WATCHDOG_FLAG_STRICT (1 << 3) /* firmware built with WATCHDOG=1: the host protocol applies */
+#define AIRSPY_WATCHDOG_SELF_FEEDS (6) /* strict mode: self feeds before contact, about 5.6 s each */
+
+typedef struct
+{
+    uint32_t flags;           /* AIRSPY_WATCHDOG_FLAG_* */
+    uint32_t timeout_ms;      /* time between feeds the device tolerates */
+    uint32_t remaining_ms; /* time left before a reset when the reply was built */
+    uint32_t self_feeds_left; /* strict mode: self feeds left before contact; 0xFFFFFFFF when unlimited */
+} airspy_watchdog_status_t;
+
 typedef enum
 {
     CONFIG_CALIBRATION = 0,

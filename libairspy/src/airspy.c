@@ -2189,6 +2189,36 @@ int airspy_list_devices(uint64_t *serials, int count)
 		return AIRSPY_SUCCESS;
 	}
 
+	static int airspy_watchdog_request(airspy_device_t* device, uint16_t feed, airspy_watchdog_status_t* status)
+	{
+		airspy_watchdog_status_t local;
+		airspy_watchdog_status_t* s = status ? status : &local;
+		uint32_t* words = (uint32_t*)s;
+		size_t i;
+		int result;
+
+		result = libusb_control_transfer(
+			device->usb_device,
+			LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+			AIRSPY_WATCHDOG,
+			0,
+			feed,
+			(unsigned char*)s,
+			sizeof(airspy_watchdog_status_t),
+			LIBUSB_CTRL_TIMEOUT_MS);
+
+		if (result < (int)sizeof(airspy_watchdog_status_t))
+		{
+			return AIRSPY_ERROR_LIBUSB;
+		}
+		for (i = 0; i < sizeof(airspy_watchdog_status_t) / sizeof(uint32_t); i++)
+		{
+			words[i] = TO_LE(words[i]);
+		}
+		return AIRSPY_SUCCESS;
+	}
+
+
 	int ADDCALL airspy_transfer_get_metadata(airspy_transfer* transfer, airspy_transfer_metadata_t* metadata)
 	{
 		airspy_device_t* device;
@@ -2356,3 +2386,13 @@ int ADDCALL airspy_call(struct airspy_device* device, uint32_t core, uint32_t ad
 		waited++;
 	}
 }
+
+	int ADDCALL airspy_watchdog_status(airspy_device_t* device, airspy_watchdog_status_t* status)
+	{
+		return airspy_watchdog_request(device, 0, status);
+	}
+
+	int ADDCALL airspy_watchdog_feed(airspy_device_t* device, airspy_watchdog_status_t* status)
+	{
+		return airspy_watchdog_request(device, 1, status);
+	}

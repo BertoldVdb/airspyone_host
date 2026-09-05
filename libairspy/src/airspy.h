@@ -247,9 +247,14 @@ extern ADDAPI int ADDCALL airspy_set_packing(struct airspy_device* device, uint8
 /* Read the device stream counters */
 extern ADDAPI int ADDCALL airspy_get_stream_status(struct airspy_device* device, airspy_stream_status_t* status);
 
+extern ADDAPI int ADDCALL airspy_watchdog_status(struct airspy_device* device, airspy_watchdog_status_t* status);
+extern ADDAPI int ADDCALL airspy_watchdog_feed(struct airspy_device* device, airspy_watchdog_status_t* status);
+
 /* Framed chunks: the library asks the device, at every airspy_start_rx() */
 extern ADDAPI int ADDCALL airspy_set_framing(struct airspy_device* device, uint8_t value);
 
+/* Host-fed watchdog, a compile time option of the firmware */
+extern ADDAPI int ADDCALL airspy_watchdog_feed(struct airspy_device* device, airspy_watchdog_status_t* status);
 
 /* Fill in the metadata of the block a sample callback is being called with */
 extern ADDAPI int ADDCALL airspy_transfer_get_metadata(airspy_transfer* transfer, airspy_transfer_metadata_t* metadata);

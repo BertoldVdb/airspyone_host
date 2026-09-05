@@ -239,6 +239,7 @@ uint64_t bytes_to_xfer = 0;
 bool call_set_packing = false;
 uint32_t packing_val = 0;
 uint32_t framing_val = 1;
+uint32_t watchdog_val = 0;
 bool framing_given = false;
 airspy_transfer_metadata_t frame_meta;
 uint64_t frame_gap_samples = 0;
@@ -490,6 +491,7 @@ static void usage(void)
 	fprintf(stderr, "[-s serial_number_64bits]: Open device with specified 64bits serial number\n");
 	fprintf(stderr, "[-p packing]: Set packing for samples, \n");
 	fprintf(stderr, "[-F framing]: Framed chunks with sample counters, 1=enabled(default, if the firmware supports it), 0=disabled\n");
+	fprintf(stderr, "[-W watchdog]: 1=feed the device watchdog every second and show its state, 0=disabled(default)\n");
 	fprintf(stderr, " 1=enabled(12bits packed), 0=disabled(default 16bits not packed)\n");
 	fprintf(stderr, "[-f frequency_MHz]: Set frequency in MHz between [%lu, %lu] (default %luMHz)\n",
 		FREQ_HZ_MIN / FREQ_ONE_MHZ, FREQ_HZ_MAX / FREQ_ONE_MHZ, DEFAULT_FREQ_HZ / FREQ_ONE_MHZ);
@@ -554,7 +556,7 @@ int main(int argc, char** argv)
 	double freq_hz_temp;
 	char str[20];
 
-	while( (opt = getopt(argc, argv, "r:ws:p:F:f:a:t:b:v:m:l:g:h:n:d")) != EOF )
+	while( (opt = getopt(argc, argv, "r:ws:p:F:W:f:a:t:b:v:m:l:g:h:n:d")) != EOF )
 	{
 		result = AIRSPY_SUCCESS;
 		switch( opt ) 
@@ -572,6 +574,14 @@ int main(int argc, char** argv)
 				serial_number = true;
 				result = parse_u64(optarg, &serial_number_val);
 			break;
+
+			case 'W': /* watchdog */
+				result = parse_u32(optarg, &watchdog_val);
+				if (result == AIRSPY_SUCCESS && watchdog_val > 1)
+				{
+					result = AIRSPY_ERROR_INVALID_PARAM;
+				}
+				break;
 
 			case 'F': /* framing */
 				framing_given = true;
@@ -1091,6 +1101,19 @@ int main(int argc, char** argv)
 				stream_status.backlog_max, stream_status.ring_chunks, stream_status.m0_lag_max, stream_status.lost, stream_status.overruns, stream_status.dma_errors, stream_status.usb_errors, stream_status.adc_overflows);
 			fprintf(stderr, "Device ring: backlog max %u of %u chunks (device queue lag max %u), lost %u, overruns %u\n",
 				stream_status.backlog_max, stream_status.ring_chunks, stream_status.m0_lag_max, stream_status.lost, stream_status.overruns);
+		}
+		if (watchdog_val)
+		{
+			airspy_watchdog_status_t wd;
+			if (airspy_watchdog_feed(device, &wd) == AIRSPY_SUCCESS)
+			{
+				if (wd.flags & AIRSPY_WATCHDOG_FLAG_ARMED)
+					fprintf(stderr, "Watchdog: armed%s, timeout %u ms, %u ms were left before this feed%s\n",
+						(wd.flags & AIRSPY_WATCHDOG_FLAG_HOST_OWNED) ? ", host in charge" : "",
+						wd.timeout_ms, wd.remaining_ms, (wd.flags & AIRSPY_WATCHDOG_FLAG_RESET_BY_WATCHDOG) ? ", last reset was the watchdog" : "");
+				else
+					fprintf(stderr, "Watchdog: not built into this firmware\n");
+			}
 		}
 		if (frame_blocks)
 		{
