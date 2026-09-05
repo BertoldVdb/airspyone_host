@@ -1051,8 +1051,8 @@ int main(int argc, char** argv)
 		fprintf(stderr, "Streaming at %5s MSPS\n", str);
 		if (airspy_get_stream_status(device, &stream_status) == AIRSPY_SUCCESS)
 		{
-			fprintf(stderr, "Device ring: backlog max %u of %u chunks, lost %u, overruns %u\n",
-				stream_status.backlog_max, stream_status.ring_chunks, stream_status.lost, stream_status.overruns);
+			fprintf(stderr, "Device ring: backlog max %u of %u chunks (device queue lag max %u), lost %u, overruns %u\n",
+				stream_status.backlog_max, stream_status.ring_chunks, stream_status.m0_lag_max, stream_status.lost, stream_status.overruns);
 		}
 		if ((limit_num_samples == true) && (bytes_to_xfer == 0))
 			do_exit = true;
