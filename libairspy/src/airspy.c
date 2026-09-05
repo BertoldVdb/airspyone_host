@@ -1534,6 +1534,34 @@ int airspy_list_devices(uint64_t *serials, int count)
 		}
 	}
 
+	int ADDCALL airspy_get_stream_status(airspy_device_t* device, airspy_stream_status_t* status)
+	{
+		int result;
+		uint32_t* words = (uint32_t*)status;
+		size_t i;
+
+		result = libusb_control_transfer(
+			device->usb_device,
+			LIBUSB_ENDPOINT_IN | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+			AIRSPY_GET_STREAM_STATUS,
+			0,
+			0,
+			(unsigned char*)status,
+			sizeof(airspy_stream_status_t),
+			LIBUSB_CTRL_TIMEOUT_MS);
+
+		if (result < (int)sizeof(airspy_stream_status_t))
+		{
+			return AIRSPY_ERROR_LIBUSB;
+		}
+
+		for (i = 0; i < sizeof(airspy_stream_status_t) / sizeof(uint32_t); i++)
+		{
+			words[i] = TO_LE(words[i]);
+		}
+		return AIRSPY_SUCCESS;
+	}
+
 	int ADDCALL airspy_board_id_read(airspy_device_t* device, uint8_t* value)
 	{
 		int result;

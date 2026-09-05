@@ -1044,10 +1044,16 @@ int main(int argc, char** argv)
 	while( (airspy_is_streaming(device) == AIRSPY_TRUE) &&
 		(do_exit == false) )
 	{
+		airspy_stream_status_t stream_status;
 		float average_rate_now = average_rate * 1e-6f;
 		sprintf(str, "%2.3f", average_rate_now);
 		average_rate_now = 9.5f;
 		fprintf(stderr, "Streaming at %5s MSPS\n", str);
+		if (airspy_get_stream_status(device, &stream_status) == AIRSPY_SUCCESS)
+		{
+			fprintf(stderr, "Device ring: backlog max %u of %u chunks, lost %u, overruns %u\n",
+				stream_status.backlog_max, stream_status.ring_chunks, stream_status.lost, stream_status.overruns);
+		}
 		if ((limit_num_samples == true) && (bytes_to_xfer == 0))
 			do_exit = true;
 		else

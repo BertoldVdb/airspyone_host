@@ -116,6 +116,18 @@ typedef struct {
 	uint32_t revision;
 } airspy_lib_version_t;
 
+/* Device stream counters, in chunks */
+typedef struct {
+	uint32_t captured;      /* chunks captured by the ADC DMA */
+	uint32_t delivered; /* chunks whose USB transfer to the host completed */
+	uint32_t lost; /* chunks overwritten before they could be sent: the sample stream has gaps */
+	uint32_t overruns; /* times the DMA started overwriting a chunk not yet delivered */
+	uint32_t backlog_max; /* worst (captured - delivered) seen; must stay below ring_chunks */
+	uint32_t ring_chunks;   /* chunks the device ring buffer holds */
+	uint32_t chunk_bytes;   /* bytes per chunk on USB */
+	uint32_t chunk_samples; /* real ADC samples per chunk (half as many IQ samples) */
+} airspy_stream_status_t;
+
 typedef int (*airspy_sample_block_cb_fn)(airspy_transfer* transfer);
 
 extern ADDAPI void ADDCALL airspy_lib_version(airspy_lib_version_t* lib_version);
@@ -215,6 +227,9 @@ extern ADDAPI int ADDCALL airspy_set_rf_bias(struct airspy_device* dev, uint8_t 
 
 /* Parameter value shall be 0=Disable Packing or 1=Enable Packing */
 extern ADDAPI int ADDCALL airspy_set_packing(struct airspy_device* device, uint8_t value);
+
+/* Read the device stream counters */
+extern ADDAPI int ADDCALL airspy_get_stream_status(struct airspy_device* device, airspy_stream_status_t* status);
 
 extern ADDAPI const char* ADDCALL airspy_error_name(enum airspy_error errcode);
 extern ADDAPI const char* ADDCALL airspy_board_id_name(enum airspy_board_id board_id);
