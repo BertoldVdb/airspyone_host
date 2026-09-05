@@ -106,6 +106,7 @@ typedef struct airspy_device
 	void *output_buffer;
 	uint16_t *unpacked_samples;
 	bool packing_enabled;
+	bool dev_mem_buffers;
 	bool framing_requested;
 	bool framing_active;
 	uint8_t *framed_samples;
@@ -155,6 +156,75 @@ static int cancel_transfers(airspy_device_t* device)
 	}
 }
 
+static void* alloc_usb_buffer(airspy_device_t* device)
+{
+#if defined(LIBUSB_API_VERSION) && (LIBUSB_API_VERSION >= 0x01000105)
+	if (device->dev_mem_buffers)
+	{
+		return libusb_dev_mem_alloc(device->usb_device, device->buffer_size);
+	}
+#endif
+	return malloc(device->buffer_size);
+}
+
+static void free_usb_buffer(airspy_device_t* device, void* buffer)
+{
+	if (buffer == NULL)
+	{
+		return;
+	}
+#if defined(LIBUSB_API_VERSION) && (LIBUSB_API_VERSION >= 0x01000105)
+	if (device->dev_mem_buffers)
+	{
+		libusb_dev_mem_free(device->usb_device, (unsigned char*)buffer, device->buffer_size);
+		return;
+	}
+#endif
+	free(buffer);
+}
+
+static int allocate_usb_buffers(airspy_device_t* device, unsigned char** transfer_buffers)
+{
+	int i;
+	uint32_t t;
+
+	for (i = 0; i < RAW_BUFFER_COUNT; i++)
+	{
+		device->received_samples_queue[i] = (uint16_t*)alloc_usb_buffer(device);
+		if (device->received_samples_queue[i] == NULL)
+		{
+			return -1;
+		}
+		memset(device->received_samples_queue[i], 0, device->buffer_size);
+	}
+	for (t = 0; t < device->transfer_count; t++)
+	{
+		transfer_buffers[t] = (unsigned char*)alloc_usb_buffer(device);
+		if (transfer_buffers[t] == NULL)
+		{
+			return -1;
+		}
+	}
+	return 0;
+}
+
+static void release_usb_buffers(airspy_device_t* device, unsigned char** transfer_buffers)
+{
+	int i;
+	uint32_t t;
+
+	for (i = 0; i < RAW_BUFFER_COUNT; i++)
+	{
+		free_usb_buffer(device, device->received_samples_queue[i]);
+		device->received_samples_queue[i] = NULL;
+	}
+	for (t = 0; t < device->transfer_count; t++)
+	{
+		free_usb_buffer(device, transfer_buffers[t]);
+		transfer_buffers[t] = NULL;
+	}
+}
+
 static int free_transfers(airspy_device_t* device)
 {
 	int i;
@@ -167,7 +237,7 @@ static int free_transfers(airspy_device_t* device)
 		{
 			if (device->transfers[transfer_index] != NULL)
 			{
-				free(device->transfers[transfer_index]->buffer);
+				free_usb_buffer(device, device->transfers[transfer_index]->buffer);
 				libusb_free_transfer(device->transfers[transfer_index]);
 				device->transfers[transfer_index] = NULL;
 			}
@@ -195,11 +265,8 @@ static int free_transfers(airspy_device_t* device)
 
 		for (i = 0; i < RAW_BUFFER_COUNT; i++)
 		{
-			if (device->received_samples_queue[i] != NULL)
-			{
-				free(device->received_samples_queue[i]);
-				device->received_samples_queue[i] = NULL;
-			}
+			free_usb_buffer(device, device->received_samples_queue[i]);
+			device->received_samples_queue[i] = NULL;
 		}
 	}
 
@@ -208,89 +275,101 @@ static int free_transfers(airspy_device_t* device)
 
 static int allocate_transfers(airspy_device_t* const device)
 {
-	int i;
 	size_t sample_count;
 	uint32_t transfer_index;
+	unsigned char** transfer_buffers;
 
-	if (device->transfers == NULL)
-	{
-		for (i = 0; i < RAW_BUFFER_COUNT; i++)
-		{
-			device->received_samples_queue[i] = (uint16_t *)malloc(device->buffer_size);
-			if (device->received_samples_queue[i] == NULL)
-			{
-				return AIRSPY_ERROR_NO_MEM;
-			}
-
-			memset(device->received_samples_queue[i], 0, device->buffer_size);
-		}
-
-		if (device->packing_enabled)
-		{
-			sample_count = ((device->buffer_size / 2) * 4) / 3;
-		}
-		else
-		{
-			sample_count = device->buffer_size / 2;
-		}
-
-		device->output_buffer = (float *)malloc(sample_count * sizeof(float));
-		if (device->output_buffer == NULL)
-		{
-			return AIRSPY_ERROR_NO_MEM;
-		}
-
-		if (device->packing_enabled)
-		{
-			device->unpacked_samples = (uint16_t*)malloc(sample_count * sizeof(uint16_t));
-			if (device->unpacked_samples == NULL)
-			{
-				return AIRSPY_ERROR_NO_MEM;
-			}
-		}
-
-		device->framed_samples = (uint8_t*)malloc(device->buffer_size);
-		if (device->framed_samples == NULL)
-		{
-			return AIRSPY_ERROR_NO_MEM;
-		}
-
-		device->transfers = (struct libusb_transfer**) calloc(device->transfer_count, sizeof(struct libusb_transfer));
-		if (device->transfers == NULL)
-		{
-			return AIRSPY_ERROR_NO_MEM;
-		}
-
-		for (transfer_index = 0; transfer_index<device->transfer_count; transfer_index++)
-		{
-			device->transfers[transfer_index] = libusb_alloc_transfer(0);
-			if (device->transfers[transfer_index] == NULL)
-			{
-				return AIRSPY_ERROR_LIBUSB;
-			}
-
-			libusb_fill_bulk_transfer(
-				device->transfers[transfer_index],
-				device->usb_device,
-				0,
-				(unsigned char*)malloc(device->buffer_size),
-				device->buffer_size,
-				NULL,
-				device,
-				0
-				);
-
-			if (device->transfers[transfer_index]->buffer == NULL)
-			{
-				return AIRSPY_ERROR_NO_MEM;
-			}
-		}
-		return AIRSPY_SUCCESS;
-	}
-	else
+	if (device->transfers != NULL)
 	{
 		return AIRSPY_ERROR_BUSY;
 	}
+
+	transfer_buffers = (unsigned char**)calloc(device->transfer_count, sizeof(unsigned char*));
+	if (transfer_buffers == NULL)
+	{
+		return AIRSPY_ERROR_NO_MEM;
+	}
+
+	device->dev_mem_buffers = (getenv("AIRSPY_NO_ZEROCOPY") == NULL);
+	if (allocate_usb_buffers(device, transfer_buffers) != 0)
+	{
+		release_usb_buffers(device, transfer_buffers);
+		device->dev_mem_buffers = false;
+		if (allocate_usb_buffers(device, transfer_buffers) != 0)
+		{
+			release_usb_buffers(device, transfer_buffers);
+			free(transfer_buffers);
+			return AIRSPY_ERROR_NO_MEM;
+		}
+	}
+
+	if (device->packing_enabled)
+	{
+		sample_count = ((device->buffer_size / 2) * 4) / 3;
+	}
+	else
+	{
+		sample_count = device->buffer_size / 2;
+	}
+
+	device->output_buffer = (float *)malloc(sample_count * sizeof(float));
+	if (device->output_buffer == NULL)
+	{
+		release_usb_buffers(device, transfer_buffers);
+		free(transfer_buffers);
+		return AIRSPY_ERROR_NO_MEM;
+	}
+
+	if (device->packing_enabled)
+	{
+		device->unpacked_samples = (uint16_t*)malloc(sample_count * sizeof(uint16_t));
+		if (device->unpacked_samples == NULL)
+		{
+			release_usb_buffers(device, transfer_buffers);
+			free(transfer_buffers);
+			return AIRSPY_ERROR_NO_MEM;
+		}
+	}
+
+	device->framed_samples = (uint8_t*)malloc(device->buffer_size);
+	if (device->framed_samples == NULL)
+	{
+		release_usb_buffers(device, transfer_buffers);
+		free(transfer_buffers);
+		return AIRSPY_ERROR_NO_MEM;
+	}
+
+	device->transfers = (struct libusb_transfer**) calloc(device->transfer_count, sizeof(struct libusb_transfer));
+	if (device->transfers == NULL)
+	{
+		release_usb_buffers(device, transfer_buffers);
+		free(transfer_buffers);
+		return AIRSPY_ERROR_NO_MEM;
+	}
+
+	for (transfer_index = 0; transfer_index<device->transfer_count; transfer_index++)
+	{
+		device->transfers[transfer_index] = libusb_alloc_transfer(0);
+		if (device->transfers[transfer_index] == NULL)
+		{
+			free(transfer_buffers);
+			return AIRSPY_ERROR_LIBUSB;
+		}
+
+		libusb_fill_bulk_transfer(
+			device->transfers[transfer_index],
+			device->usb_device,
+			0,
+			transfer_buffers[transfer_index],
+			device->buffer_size,
+			NULL,
+			device,
+			0
+			);
+	}
+
+	free(transfer_buffers);
+	return AIRSPY_SUCCESS;
 }
 
 static int prepare_transfers(airspy_device_t* device, const uint_fast8_t endpoint_address, libusb_transfer_cb_fn callback)
@@ -990,6 +1069,7 @@ static int airspy_open_init(airspy_device_t** device, uint64_t serial_number, in
 	lib_device->transfer_count = 16;
 	lib_device->buffer_size = 262144;
 	lib_device->packing_enabled = false;
+	lib_device->dev_mem_buffers = false;
 	lib_device->framing_requested = true;
 	lib_device->framing_active = false;
 	lib_device->framed_samples = NULL;

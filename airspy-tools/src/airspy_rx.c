@@ -1089,6 +1089,8 @@ int main(int argc, char** argv)
 		{
 			fprintf(stderr, "Device ring: backlog max %u of %u chunks (device queue lag max %u), lost %u, overruns %u, dma errors %u, usb errors %u, adc overflows %u\n",
 				stream_status.backlog_max, stream_status.ring_chunks, stream_status.m0_lag_max, stream_status.lost, stream_status.overruns, stream_status.dma_errors, stream_status.usb_errors, stream_status.adc_overflows);
+			fprintf(stderr, "Device ring: backlog max %u of %u chunks (device queue lag max %u), lost %u, overruns %u\n",
+				stream_status.backlog_max, stream_status.ring_chunks, stream_status.m0_lag_max, stream_status.lost, stream_status.overruns);
 		}
 		if (frame_blocks)
 		{

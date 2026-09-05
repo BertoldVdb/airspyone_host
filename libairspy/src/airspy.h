@@ -250,6 +250,7 @@ extern ADDAPI int ADDCALL airspy_get_stream_status(struct airspy_device* device,
 /* Framed chunks: the library asks the device, at every airspy_start_rx() */
 extern ADDAPI int ADDCALL airspy_set_framing(struct airspy_device* device, uint8_t value);
 
+
 /* Fill in the metadata of the block a sample callback is being called with */
 extern ADDAPI int ADDCALL airspy_transfer_get_metadata(airspy_transfer* transfer, airspy_transfer_metadata_t* metadata);
 
