@@ -249,6 +249,7 @@ uint32_t print_uart_val = 0;
 bool calibration_given = false;
 int32_t calibration_val = 0;
 uint64_t frame_gap_samples = 0;
+uint64_t frame_duplicate_chunks = 0;
 uint32_t frame_blocks = 0;
 
 bool sample_rate = false;
@@ -384,6 +385,7 @@ int rx_callback(airspy_transfer_t* transfer)
 		if (airspy_transfer_get_metadata(transfer, &meta) == AIRSPY_SUCCESS)
 		{
 			frame_gap_samples += meta.gap_samples;
+			frame_duplicate_chunks += meta.duplicate_chunks;
 			frame_meta = meta;
 			if (meta.uart_len)
 			{
@@ -1165,15 +1167,15 @@ int main(int argc, char** argv)
 		}
 		if (frame_blocks)
 		{
-			fprintf(stderr, "Frames: sample index %llu, gap samples %llu, sync errors %u, chunks per block %u, freq %u Hz\n",
+			fprintf(stderr, "Frames: sample index %llu, gap samples %llu, duplicate chunks %llu, sync errors %u, chunks per block %u, freq %u Hz\n",
 				(unsigned long long)frame_meta.sample_index, (unsigned long long)frame_gap_samples,
-				frame_meta.sync_errors, frame_meta.chunks, frame_meta.freq_hz);
+				(unsigned long long)frame_duplicate_chunks, frame_meta.sync_errors, frame_meta.chunks, frame_meta.freq_hz);
 			if (frame_meta.pps_count)
 			{
 				fprintf(stderr, "PPS: %u edges, last at sample %llu + %.4f (%.6f s before this block), uart bytes %u\n",
 					frame_meta.pps_count, (unsigned long long)frame_meta.pps_sample_index,
 					frame_meta.pps_fraction / 4294967296.0,
-					(double)(frame_meta.sample_index - frame_meta.pps_sample_index) / (2.0 * sample_rate_val),
+					(double)(frame_meta.sample_index - frame_meta.pps_sample_index) / ((double)wav_sample_per_sec * (wav_nb_channels == 1 ? 1.0 : 2.0)),
 					uart_bytes_total);
 			}
 		}

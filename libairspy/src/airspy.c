@@ -486,6 +486,7 @@ static int deframe_buffer(airspy_device_t* device, const uint8_t* raw)
 
 	m->chunks = 0;
 	m->gap_samples = 0;
+	m->duplicate_chunks = 0;
 
 	for (c = 0; c < chunks; c++)
 	{
@@ -502,6 +503,11 @@ static int deframe_buffer(airspy_device_t* device, const uint8_t* raw)
 		index = ((uint64_t)TO_LE(w[1]) << 32) | TO_LE(w[0]);
 		count = TO_LE(w[4]);
 
+		if (device->expected_sample_index_valid && index < device->expected_sample_index)
+		{
+			m->duplicate_chunks++;
+			continue;
+		}
 		if (good == 0)
 		{
 			m->sample_index = index;

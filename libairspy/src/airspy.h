@@ -143,6 +143,7 @@ typedef struct {
 	uint32_t lost_chunks; /* chunks the device lost since the stream started */
 	uint32_t overrun_chunks; /* chunks the device delivered corrupted since the stream started */
 	uint32_t sync_errors; /* chunks with an invalid header since the stream started */
+	uint32_t duplicate_chunks; /* chunks in this block whose samples had already been delivered */
 	uint32_t freq_hz;
 	/* External PPS input, from the block's last chunk */
 	uint64_t pps_sample_index;
