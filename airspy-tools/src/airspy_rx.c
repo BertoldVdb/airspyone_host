@@ -246,6 +246,9 @@ uint32_t uart_bytes_total = 0;
 bool uart_baud_given = false;
 uint32_t uart_baud_val = 0;
 uint32_t print_uart_val = 0;
+bool sof_given = false;
+uint32_t sof_divider_val = 0;
+uint32_t sof_tags_total = 0;
 bool calibration_given = false;
 int32_t calibration_val = 0;
 uint64_t frame_gap_samples = 0;
@@ -384,9 +387,20 @@ int rx_callback(airspy_transfer_t* transfer)
 		airspy_transfer_metadata_t meta;
 		if (airspy_transfer_get_metadata(transfer, &meta) == AIRSPY_SUCCESS)
 		{
+			uint32_t i;
 			frame_gap_samples += meta.gap_samples;
 			frame_duplicate_chunks += meta.duplicate_chunks;
 			frame_meta = meta;
+			sof_tags_total += meta.sof_tags_len;
+			if (verbose)
+			{
+				for (i = 0; i < meta.sof_tags_len; i++)
+				{
+					const airspy_sof_tag_t* tag = &meta.sof_tags[i];
+					fprintf(stderr, "SOF %u: frame %u at sample %llu + %.4f\n",
+						tag->count, tag->frame, (unsigned long long)tag->sample_index, tag->fraction / 4294967296.0);
+				}
+			}
 			if (meta.uart_len)
 			{
 				uart_bytes_total += meta.uart_len;
@@ -511,6 +525,8 @@ static void usage(void)
 	fprintf(stderr, "\te.g. -a 15000000 -p 2 streams 15 MSPS IQ (30 MSPS real) at the 30 MB/s of 10 MSPS packed\n");
 	fprintf(stderr, "[-F framing]: Framed chunks with sample counters, 1=enabled(default, if the firmware supports it), 0=disabled\n");
 	fprintf(stderr, "[-W watchdog]: 1=feed the device watchdog every second and show its state, 0=disabled(default)\n");
+	fprintf(stderr, "[-S sof_divider]: Tag the USB Start-Of-Frame of every frame (1 ms) whose number is a multiple of this\n");
+	fprintf(stderr, "\twith its sample index, 0=off(default); -d prints every tag\n");
 	fprintf(stderr, " 1=enabled(12bits packed), 0=disabled(default 16bits not packed)\n");
 	fprintf(stderr, "[-f frequency_MHz]: Set frequency in MHz between [%lu, %lu] (default %luMHz)\n",
 		FREQ_HZ_MIN / FREQ_ONE_MHZ, FREQ_HZ_MAX / FREQ_ONE_MHZ, DEFAULT_FREQ_HZ / FREQ_ONE_MHZ);
@@ -575,7 +591,7 @@ int main(int argc, char** argv)
 	double freq_hz_temp;
 	char str[20];
 
-	while( (opt = getopt(argc, argv, "r:ws:p:F:W:B:N:C:f:a:t:b:v:m:l:g:h:n:d")) != EOF )
+	while( (opt = getopt(argc, argv, "r:ws:p:F:W:B:N:C:S:f:a:t:b:v:m:l:g:h:n:d")) != EOF )
 	{
 		result = AIRSPY_SUCCESS;
 		switch( opt ) 
@@ -614,6 +630,11 @@ int main(int argc, char** argv)
 
 			case 'N': /* print uart bytes */
 				result = parse_u32(optarg, &print_uart_val);
+				break;
+
+			case 'S': /* USB SOF tagging divider */
+				sof_given = true;
+				result = parse_u32(optarg, &sof_divider_val);
 				break;
 
 			case 'F': /* framing */
@@ -1025,6 +1046,14 @@ int main(int argc, char** argv)
 			printf("airspy_set_uart_baud() failed: %s (%d)\n", airspy_error_name(result), result);
 		}
 	}
+	if (sof_given)
+	{
+		result = airspy_set_sof_divider(device, sof_divider_val);
+		if (result != AIRSPY_SUCCESS)
+		{
+			printf("airspy_set_sof_divider() failed: %s (%d)\n", airspy_error_name(result), result);
+		}
+	}
 
 	if (framing_given)
 	{
@@ -1148,8 +1177,9 @@ int main(int argc, char** argv)
 		fprintf(stderr, "Streaming at %5s MSPS\n", str);
 		if (airspy_get_stream_status(device, &stream_status) == AIRSPY_SUCCESS)
 		{
-			fprintf(stderr, "Device ring: backlog max %u of %u chunks (device queue lag max %u), lost %u, overruns %u, dma errors %u, usb errors %u, adc overflows %u, pps %u\n",
-				stream_status.backlog_max, stream_status.ring_chunks, stream_status.m0_lag_max, stream_status.lost, stream_status.overruns, stream_status.dma_errors, stream_status.usb_errors, stream_status.adc_overflows, stream_status.pps_count);
+			fprintf(stderr, "Device ring: backlog max %u of %u chunks (device queue lag max %u), lost %u, overruns %u, dma errors %u, usb errors %u, adc overflows %u, pps %u, sof %u tagged of %u (divider %u)\n",
+				stream_status.backlog_max, stream_status.ring_chunks, stream_status.m0_lag_max, stream_status.lost, stream_status.overruns, stream_status.dma_errors, stream_status.usb_errors, stream_status.adc_overflows, stream_status.pps_count,
+				stream_status.sof_count, stream_status.sof_edges, stream_status.sof_divider);
 		}
 		if (watchdog_val)
 		{
@@ -1175,8 +1205,15 @@ int main(int argc, char** argv)
 				fprintf(stderr, "PPS: %u edges, last at sample %llu + %.4f (%.6f s before this block), uart bytes %u\n",
 					frame_meta.pps_count, (unsigned long long)frame_meta.pps_sample_index,
 					frame_meta.pps_fraction / 4294967296.0,
-					(double)(frame_meta.sample_index - frame_meta.pps_sample_index) / ((double)wav_sample_per_sec * (wav_nb_channels == 1 ? 1.0 : 2.0)),
+					(double)(int64_t)(frame_meta.sample_index - frame_meta.pps_sample_index) / ((double)wav_sample_per_sec * (wav_nb_channels == 1 ? 1.0 : 2.0)),
 					uart_bytes_total);
+			}
+			if (frame_meta.sof_count)
+			{
+				fprintf(stderr, "SOF: %u tagged, %u received, last: frame %u at sample %llu + %.4f (%.6f s before this block)\n",
+					frame_meta.sof_count, sof_tags_total, frame_meta.sof_frame,
+					(unsigned long long)frame_meta.sof_sample_index, frame_meta.sof_fraction / 4294967296.0,
+					(double)(int64_t)(frame_meta.sample_index - frame_meta.sof_sample_index) / ((double)wav_sample_per_sec * (wav_nb_channels == 1 ? 1.0 : 2.0)));
 			}
 		}
 		if ((limit_num_samples == true) && (bytes_to_xfer == 0))

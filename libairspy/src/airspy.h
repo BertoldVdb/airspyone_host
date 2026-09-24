@@ -131,10 +131,22 @@ typedef struct {
 	uint32_t usb_errors; /* bulk transfers the USB controller retired with an error */
   uint32_t adc_overflows; /* chunks during which the ADC FIFO overflowed */
   uint32_t pps_count; /* PPS edges captured since the stream started */
+  uint32_t sof_count; /* USB SOFs tagged since the stream started, see airspy_set_sof_divider() */
+  uint32_t sof_edges; /* USB SOFs captured since the stream started, tagged or not */
+  uint32_t sof_divider; /* SOF tagging divider in effect, 0 = off */
 } airspy_stream_status_t;
 
 /* Metadata of the block delivered to the sample callback */
 #define AIRSPY_METADATA_UART_MAX (512) /* more than the 15 bytes per chunk times the chunks per block */
+#define AIRSPY_METADATA_SOF_MAX (40) /* more than the chunks per block: each chunk carries one SOF tag */
+
+/* A USB Start-Of-Frame tag: the device captured the SOF opening USB frame 'frame' at this sample */
+typedef struct {
+	uint64_t sample_index;
+	uint32_t fraction; /* position of the SOF within that sample, in 1/2^32 sample units */
+	uint32_t frame; /* USB frame number, extended past the controller's 11-bit wrap by the device */
+	uint32_t count; /* SOFs tagged since the stream started, this one included */
+} airspy_sof_tag_t;
 
 typedef struct {
 	uint64_t sample_index; /* device sample index of the first sample of this block */
@@ -153,6 +165,13 @@ typedef struct {
 	uint32_t uart_len;
 	uint8_t uart_data[AIRSPY_METADATA_UART_MAX];
 	uint32_t flags;          /* AIRSPY_FRAME_FLAG_* of the first chunk */
+	/* USB Start-Of-Frame tags, see airspy_set_sof_divider(): the block's last one, and every distinct one its chunks carried */
+	uint64_t sof_sample_index;
+	uint32_t sof_fraction;
+	uint32_t sof_frame;
+	uint32_t sof_count;
+	uint32_t sof_tags_len;
+	airspy_sof_tag_t sof_tags[AIRSPY_METADATA_SOF_MAX];
 } airspy_transfer_metadata_t;
 
 
@@ -254,6 +273,14 @@ extern ADDAPI int ADDCALL airspy_set_packing(struct airspy_device* device, uint8
 
 /* Read the device stream counters */
 extern ADDAPI int ADDCALL airspy_get_stream_status(struct airspy_device* device, airspy_stream_status_t* status);
+
+/* USB Start-Of-Frame timestamps: the device tags the SOF opening every USB frame (1 ms; at high speed the
+   microframe 0 SOF, the one a full-speed bus sees) whose frame number is a multiple of the divider, with its
+   sample index; 0 turns it off. The tags reach the sample callback through airspy_transfer_get_metadata().
+   Can be changed while streaming; the library sends it again at every airspy_start_rx(). Each chunk header
+   carries one tag, so keep the tag rate below the chunk rate (sample rate / chunk_samples) to receive every
+   tag; a skipped tag shows as a jump in the tag count. Works alongside the PPS input. */
+extern ADDAPI int ADDCALL airspy_set_sof_divider(struct airspy_device* device, uint32_t divider);
 
 /* Auxiliary UART on the device (GNSS module): 8N1 */
 extern ADDAPI int ADDCALL airspy_set_uart_baud(struct airspy_device* device, uint32_t baud);

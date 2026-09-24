@@ -110,6 +110,8 @@ typedef struct airspy_device
 	bool dev_mem_buffers;
 	bool framing_requested;
 	bool framing_active;
+	uint32_t sof_count_seen; /* last SOF tag count deframed: a change means a new tag */
+	uint32_t sof_divider; /* requested SOF tagging divider, sent at every airspy_start_rx() */
 	uint8_t *framed_samples;
 	airspy_transfer_metadata_t meta;
 	bool meta_valid;
@@ -465,6 +467,22 @@ if (result < 1)
 return AIRSPY_SUCCESS;
 }
 
+static int send_sof_divider(airspy_device_t* device, uint32_t divider)
+{
+	int result = libusb_control_transfer(
+		device->usb_device,
+		LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR | LIBUSB_RECIPIENT_DEVICE,
+		AIRSPY_SET_SOF_DIVIDER,
+		divider & 0xFFFF,
+		divider >> 16,
+		NULL,
+		0,
+		LIBUSB_CTRL_TIMEOUT_MS);
+	if (result != 0)
+		return AIRSPY_ERROR_LIBUSB;
+	return AIRSPY_SUCCESS;
+}
+
 static inline void unpack_samples_8bit(const uint8_t *input, uint16_t *output, int length)
 {
 	int i;
@@ -487,6 +505,7 @@ static int deframe_buffer(airspy_device_t* device, const uint8_t* raw)
 	m->chunks = 0;
 	m->gap_samples = 0;
 	m->duplicate_chunks = 0;
+	m->sof_tags_len = 0;
 
 	for (c = 0; c < chunks; c++)
 	{
@@ -525,6 +544,19 @@ static int deframe_buffer(airspy_device_t* device, const uint8_t* raw)
 		m->pps_sample_index = ((uint64_t)TO_LE(w[10]) << 32) | TO_LE(w[9]);
 		m->pps_fraction = TO_LE(w[11]);
 		m->pps_count = TO_LE(w[12]);
+		m->sof_sample_index = ((uint64_t)TO_LE(w[18]) << 32) | TO_LE(w[17]);
+		m->sof_fraction = TO_LE(w[19]);
+		m->sof_frame = TO_LE(w[20]);
+		m->sof_count = TO_LE(w[21]);
+		if (m->sof_count != 0 && m->sof_count != device->sof_count_seen && m->sof_tags_len < AIRSPY_METADATA_SOF_MAX)
+		{
+			airspy_sof_tag_t* tag = &m->sof_tags[m->sof_tags_len++];
+			tag->sample_index = m->sof_sample_index;
+			tag->fraction = m->sof_fraction;
+			tag->frame = m->sof_frame;
+			tag->count = m->sof_count;
+		}
+		device->sof_count_seen = m->sof_count;
 		{
 			const uint8_t* b = (const uint8_t*)&w[13];
 			uint32_t n = b[0];
@@ -1123,6 +1155,8 @@ static int airspy_open_init(airspy_device_t** device, uint64_t serial_number, in
 	lib_device->framed_samples = NULL;
 	lib_device->meta_valid = false;
 	lib_device->expected_sample_index_valid = false;
+	lib_device->sof_count_seen = 0;
+	lib_device->sof_divider = 0;
 	memset(&lib_device->meta, 0, sizeof(lib_device->meta));
 	lib_device->streaming = false;
 	lib_device->stop_requested = false;
@@ -1443,6 +1477,7 @@ int airspy_list_devices(uint64_t *serials, int count)
 		memset(&device->meta, 0, sizeof(device->meta));
 		device->meta_valid = false;
 		device->expected_sample_index_valid = false;
+		device->sof_count_seen = 0;
 
 		result = airspy_set_receiver_mode(device, RECEIVER_MODE_OFF);
 		if (result != AIRSPY_SUCCESS)
@@ -1456,6 +1491,14 @@ int airspy_list_devices(uint64_t *serials, int count)
 		if (device->framing_requested)
 		{
 			device->framing_active = (send_framing(device, 1) == AIRSPY_SUCCESS);
+		}
+		if (device->sof_divider != 0)
+		{
+			result = send_sof_divider(device, device->sof_divider);
+			if (result != AIRSPY_SUCCESS)
+			{
+				return result;
+			}
 		}
 
 		result = airspy_set_receiver_mode(device, RECEIVER_MODE_RX);
@@ -1798,9 +1841,13 @@ int airspy_list_devices(uint64_t *serials, int count)
 			sizeof(airspy_stream_status_t),
 			LIBUSB_CTRL_TIMEOUT_MS);
 
-		if (result < (int)sizeof(airspy_stream_status_t))
+		if (result < (int)(13 * sizeof(uint32_t))) /* an older firmware stops after pps_count */
 		{
 			return AIRSPY_ERROR_LIBUSB;
+		}
+		if (result < (int)sizeof(airspy_stream_status_t))
+		{
+			memset((uint8_t*)status + result, 0, sizeof(airspy_stream_status_t) - result);
 		}
 
 		for (i = 0; i < sizeof(airspy_stream_status_t) / sizeof(uint32_t); i++)
@@ -2359,6 +2406,12 @@ int airspy_list_devices(uint64_t *serials, int count)
 #ifdef __cplusplus
 } // __cplusplus defined.
 #endif
+
+int ADDCALL airspy_set_sof_divider(struct airspy_device* device, uint32_t divider)
+{
+	device->sof_divider = divider;
+	return send_sof_divider(device, divider);
+}
 
 int ADDCALL airspy_set_uart_baud(struct airspy_device* device, uint32_t baud)
 {

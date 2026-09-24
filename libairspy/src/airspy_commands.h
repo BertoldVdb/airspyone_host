@@ -51,7 +51,7 @@ typedef enum
 #define AIRSPY_CONF_CMD_SHIFT_BIT (3) // Up to 3bits=8 samplerates (airspy_samplerate_t enum shall not exceed 7)
 
 // Commands (usb vendor request) shared between Firmware and Host.
-#define AIRSPY_CMD_MAX (37)
+#define AIRSPY_CMD_MAX (38)
 typedef enum
 {
     AIRSPY_INVALID                    = 0 ,
@@ -86,13 +86,14 @@ typedef enum
     AIRSPY_SET_FRAMING                = 29,
     AIRSPY_WATCHDOG                   = 30,
   AIRSPY_SET_UART_BAUD = 31, /* wValue = baud & 0xFFFF, wIndex = baud >> 16 */
-  AIRSPY_UART_WRITE = 32,
+  AIRSPY_UART_WRITE = 32, /* OUT data = bytes to transmit (max 64) */
   AIRSPY_SET_CALIBRATION = 33, /* wValue|wIndex<<16 = crystal correction in ppb (int32), applied at once */
-  AIRSPY_GET_CALIBRATION = 34,
+  AIRSPY_GET_CALIBRATION = 34, /* IN: airspy_calibration_t */
   /* Debug access, see airspy_debug: */
   AIRSPY_MEM_READ = 35, /* IN: wValue | wIndex << 16 = address, wLength <= 64 bytes */
   AIRSPY_MEM_WRITE = 36, /* OUT: same addressing, data = bytes to write */
-  AIRSPY_CALL = AIRSPY_CMD_MAX /* OUT: airspy_call_request_t runs a function; IN: airspy_call_result_t */ /* IN: airspy_calibration_t */ /* OUT data = bytes to transmit (max 64) */
+  AIRSPY_CALL = 37, /* OUT: airspy_call_request_t runs a function; IN: airspy_call_result_t */
+  AIRSPY_SET_SOF_DIVIDER = AIRSPY_CMD_MAX /* wValue | wIndex << 16 = divider: tag the first SOF of every USB frame whose number is a multiple of it, 0 = off; cleared at every stream stop */
 } airspy_vendor_request;
 
 #define AIRSPY_FRAME_HEADER_SIZE (96)
@@ -133,7 +134,19 @@ typedef struct
   uint32_t lost_chunks; /* chunks the device lost so far, see airspy_stream_status_t */
   uint32_t overrun_chunks; /* chunks the device delivered corrupted so far */
   uint32_t freq_hz; /* tuner frequency the device was set to when this chunk was queued */
-  uint32_t reserved[15];   /* zero */
+  uint32_t pps_sample_index_lo; /* sample index of the last PPS edge captured since the stream started */
+  uint32_t pps_sample_index_hi;
+  uint32_t pps_fraction; /* position of that edge within the sample, in 1/2^32 sample units */
+  uint32_t pps_count; /* PPS edges captured since the stream started */
+  uint8_t uart_len; /* bytes received on the auxiliary UART (GNSS module) carried in this chunk */
+  uint8_t uart_data[15]; /* AIRSPY_FRAME_UART_BYTES */
+  /* USB Start-Of-Frame tagging (AIRSPY_SET_SOF_DIVIDER), independent of the PPS input */
+  uint32_t sof_sample_index_lo; /* sample index of the last tagged SOF */
+  uint32_t sof_sample_index_hi;
+  uint32_t sof_fraction; /* position of that SOF within the sample, in 1/2^32 sample units */
+  uint32_t sof_frame; /* its USB frame number, extended past the 11-bit wrap by the device */
+  uint32_t sof_count; /* SOFs tagged since the stream started */
+  uint32_t reserved[2];    /* zero */
 } airspy_frame_header_t;   /* AIRSPY_FRAME_HEADER_SIZE bytes */
 
 /* Chunk size on the wire, framed or not */
