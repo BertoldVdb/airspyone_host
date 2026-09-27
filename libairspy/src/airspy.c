@@ -106,7 +106,7 @@ typedef struct airspy_device
 	void *output_buffer;
 	uint16_t *unpacked_samples;
 	bool packing_enabled;
-	uint8_t packing_mode; /* 0 = 16-bit, 1 = 12-bit packed, 2 = 8-bit */
+	uint8_t packing_mode; /* 0 = 16-bit, 1 = 12-bit packed, 3 = 8-bit */
 	bool dev_mem_buffers;
 	bool framing_requested;
 	bool framing_active;
@@ -306,7 +306,7 @@ static int allocate_transfers(airspy_device_t* const device)
 		}
 	}
 
-	if (device->packing_mode == 2)
+	if (device->packing_mode == 3)
 	{
 		sample_count = device->buffer_size;
 	}
@@ -492,9 +492,9 @@ static inline void unpack_samples_8bit(const uint8_t *input, uint16_t *output, i
 
 static int deframe_buffer(airspy_device_t* device, const uint8_t* raw)
 {
-	const uint32_t wire = device->packing_mode == 2 ? AIRSPY_FRAME_WIRE_8BIT : device->packing_enabled ? AIRSPY_FRAME_WIRE_PACKED : AIRSPY_FRAME_WIRE_UNPACKED;
+	const uint32_t wire = device->packing_mode == 3 ? AIRSPY_FRAME_WIRE_8BIT : device->packing_enabled ? AIRSPY_FRAME_WIRE_PACKED : AIRSPY_FRAME_WIRE_UNPACKED;
 	const uint32_t payload = wire - AIRSPY_FRAME_HEADER_SIZE;
-	const uint32_t samples_per_chunk = device->packing_mode == 2 ? payload : device->packing_enabled ? (payload / 3) * 2 : payload / 2;
+	const uint32_t samples_per_chunk = device->packing_mode == 3 ? payload : device->packing_enabled ? (payload / 3) * 2 : payload / 2;
 	const uint32_t chunks = device->buffer_size / wire;
 	airspy_transfer_metadata_t* m = &device->meta;
 	uint32_t c;
@@ -623,7 +623,7 @@ static void* consumer_threadproc(void *arg)
 			}
 			input_samples = (uint16_t*)device->framed_samples;
 		}
-		else if (device->packing_mode == 2)
+		else if (device->packing_mode == 3)
 		{
 			sample_count = device->buffer_size;
 		}
@@ -636,7 +636,7 @@ static void* consumer_threadproc(void *arg)
 			sample_count = device->buffer_size / 2;
 		}
 
-		if (device->packing_mode == 2 && device->sample_type != AIRSPY_SAMPLE_RAW)
+		if (device->packing_mode == 3 && device->sample_type != AIRSPY_SAMPLE_RAW)
 		{
 			unpack_samples_8bit((const uint8_t*)input_samples, device->unpacked_samples, sample_count);
 			input_samples = device->unpacked_samples;
@@ -2235,6 +2235,11 @@ int airspy_list_devices(uint64_t *serials, int count)
 		{
 			return AIRSPY_ERROR_BUSY;
 		}
+		/* 2 (12-bit with a chunk counter) is not supported by this library */
+		if (value != 0 && value != 1 && value != 3)
+		{
+			return AIRSPY_ERROR_INVALID_PARAM;
+		}
 
 		result = libusb_control_transfer(
 			device->usb_device,
@@ -2259,7 +2264,7 @@ int airspy_list_devices(uint64_t *serials, int count)
 
 			device->packing_enabled = packing_enabled;
 			device->packing_mode = value;
-			device->buffer_size = value == 2 ? (4096 * 36) : packing_enabled ? (6144 * 24) : 262144;
+			device->buffer_size = value == 3 ? (4096 * 36) : packing_enabled ? (6144 * 24) : 262144;
 
 			result = allocate_transfers(device);
 			if (result != 0)

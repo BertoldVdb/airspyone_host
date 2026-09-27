@@ -441,7 +441,7 @@ int rx_callback(airspy_transfer_t* transfer)
 				break;
 
 			case AIRSPY_SAMPLE_RAW:
-				if (packing_val == 2)
+				if (packing_val == 3)
 				{
 					bytes_to_write = transfer->sample_count; /* 8-bit: one byte per sample */
 				}
@@ -521,8 +521,8 @@ static void usage(void)
 	fprintf(stderr, "-w Receive data into file with WAV header and automatic name\n");
 	fprintf(stderr, " This is for SDR# compatibility and may not work with other software\n");
 	fprintf(stderr, "[-s serial_number_64bits]: Open device with specified 64bits serial number\n");
-	fprintf(stderr, "[-p packing]: 0 = 16-bit samples (default), 1 = 12-bit packed, 2 = 8-bit (top 8 bits),\n");
-	fprintf(stderr, "\te.g. -a 15000000 -p 2 streams 15 MSPS IQ (30 MSPS real) at the 30 MB/s of 10 MSPS packed\n");
+	fprintf(stderr, "[-p packing]: 0 = 16-bit samples (default), 1 = 12-bit packed, 3 = 8-bit (top 8 bits),\n");
+	fprintf(stderr, "\te.g. -a 15000000 -p 3 streams 15 MSPS IQ (30 MSPS real) at the 30 MB/s of 10 MSPS packed\n");
 	fprintf(stderr, "[-F framing]: Framed chunks with sample counters, 1=enabled(default, if the firmware supports it), 0=disabled\n");
 	fprintf(stderr, "[-W watchdog]: 1=feed the device watchdog every second and show its state, 0=disabled(default)\n");
 	fprintf(stderr, "[-S sof_divider]: Tag the USB Start-Of-Frame of every frame (1 ms) whose number is a multiple of this\n");
@@ -652,7 +652,7 @@ int main(int argc, char** argv)
 				{
 					case 0:
 					case 1:
-					case 2:
+					case 3:
 						packing_val = packing_val_u32;
 						call_set_packing = true;
 					break;
